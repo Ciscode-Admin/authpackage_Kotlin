@@ -1,5 +1,5 @@
 trigger:
-  - main
+- main
 
 pool:
   vmImage: ubuntu-latest
@@ -8,34 +8,48 @@ variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 steps:
-  - checkout: self
-    fetchDepth: 0
+  # Full clone so Gradle can read tags if needed
+- checkout: self
+  fetchDepth: 0
 
-  # JDK 17 is broadly compatible with AGP 8.x; your module targets Java 11 bytecode
-  - task: JavaToolInstaller@0
-    inputs:
-      versionSpec: '17'
-      jdkArchitectureOption: 'x64'
-      jdkSourceOption: 'PreInstalled'
+# Use JDK 21 (works with Gradle 8.x and AGP 8.x)
+- task: JavaToolInstaller@0
+  inputs:
+    versionSpec: '21'
+    jdkArchitectureOption: 'x64'
+    jdkSourceOption: 'PreInstalled'
+  displayName: Use Java 21
 
-  - script: chmod +x ./gradlew
-    displayName: Make gradlew executable
+# Make wrapper executable
+- script: chmod +x ./gradlew
+  displayName: Make gradlew executable
 
-  - task: Cache@2
-    inputs:
-      key: 'gradle | "$(Agent.OS)" | **/gradle-wrapper.properties'
-      restoreKeys: |
-        gradle | "$(Agent.OS)"
-      path: ~/.gradle/caches
-    displayName: Cache Gradle
+# Cache Gradle artifacts (FIXED path)
+- task: Cache@2
+  displayName: Cache Gradle
+  inputs:
+    key: 'gradle | "$(Agent.OS)" | **/gradle-wrapper.properties'
+    restoreKeys: |
+      gradle | "$(Agent.OS)"
+    path: '$(HOME)/.gradle/caches'
 
-  - bash: |
-      yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
-      yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
-    displayName: Ensure Android SDK 35 is installed
+# Install Android SDK components & accept licenses
+- bash: |
+    set -e
+    yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+    "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+      "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+  displayName: Ensure Android SDK 35 is installed
 
-  # Publish the release AAR to the 'android-packages' feed using the pipeline OAuth token
-  - script: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
-    displayName: Publish authui (release) to android-packages
-    env:
-      AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
+# Build the release AAR
+- bash: |
+    ./gradlew clean :assembleRelease
+  displayName: Build release AAR
+
+# Publish to Azure Artifacts (org-scoped feed)
+- bash: |
+    ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
+  displayName: Publish authui (release) to android-packages
+  env:
+    AZURE_ARTIFACTS_USERNAME: 'azdo'
+    AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
