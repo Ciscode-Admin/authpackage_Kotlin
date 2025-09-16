@@ -1,0 +1,39 @@
+trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+
+  - task: JavaToolInstaller@0
+    inputs:
+      versionSpec: '21'
+      jdkArchitectureOption: 'x64'
+      jdkSourceOption: 'PreInstalled'
+
+  - script: chmod +x ./gradlew
+    displayName: Make gradlew executable
+
+  - task: Cache@2
+    inputs:
+      key: 'gradle | "$(Agent.OS)" | **/gradle-wrapper.properties'
+      restoreKeys: |
+        gradle | "$(Agent.OS)"
+      path: ~/.gradle/caches
+    displayName: Cache Gradle
+
+  - bash: |
+      yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+      yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+    displayName: Ensure Android SDK 35 is installed
+
+  - script: ./gradlew :loginui:publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace
+    displayName: Publish authui (release) to android-packages
+    env:
+      AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
