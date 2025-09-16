@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    id("maven-publish")
 }
 
 android {
@@ -30,8 +31,46 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
 }
 
+group = "com.ciscod.android"
+version = "0.1.0"
+
+publishing {
+    repositories {
+        maven {
+            name = "azureArtifacts"
+            // Org-scoped feed URL
+            url = uri("https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1")
+            credentials {
+                // Any non-empty username is fine for Azure Artifacts basic auth
+                username = System.getenv("AZURE_ARTIFACTS_USERNAME") ?: "azdo"
+                // Will be supplied by the pipeline as an environment variable
+                password = System.getenv("AZURE_ARTIFACTS_TOKEN")
+            }
+        }
+    }
+    publications {
+        create<MavenPublication>("authuiRelease") {
+            groupId = "com.ciscod.android"
+            artifactId = "authui"
+            version = "0.1.0"
+            // publish the AAR from the release variant
+            afterEvaluate {
+                from(components["release"])
+            }
+            pom {
+                name.set("authui")
+                description.set("Android authentication UI library")
+            }
+        }
+    }
+}
 dependencies {
 
     implementation(libs.androidx.core.ktx)
