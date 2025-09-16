@@ -10,7 +10,6 @@ android {
 
     defaultConfig {
         minSdk = 21
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }
@@ -48,9 +47,7 @@ publishing {
             // Org-scoped feed URL
             url = uri("https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1")
             credentials {
-                // Any non-empty username is fine for Azure Artifacts basic auth
                 username = System.getenv("AZURE_ARTIFACTS_USERNAME") ?: "azdo"
-                // Will be supplied by the pipeline as an environment variable
                 password = System.getenv("AZURE_ARTIFACTS_TOKEN")
             }
         }
@@ -60,10 +57,7 @@ publishing {
             groupId = "com.ciscod.android"
             artifactId = "authui"
             version = "0.1.0"
-            // publish the AAR from the release variant
-            afterEvaluate {
-                from(components["release"])
-            }
+            afterEvaluate { from(components["release"]) }
             pom {
                 name.set("authui")
                 description.set("Android authentication UI library")
@@ -71,8 +65,8 @@ publishing {
         }
     }
 }
-dependencies {
 
+dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
@@ -86,5 +80,4 @@ dependencies {
     implementation("com.microsoft.identity.client:msal:5.7.0") {
         exclude(group = "com.microsoft.device.display", module = "display-mask")
     }
-
 }
