@@ -35,7 +35,7 @@ steps:
     displayName: Ensure Android SDK 35 is installed
 
   # Publish the release AAR to the 'android-packages' feed using the pipeline OAuth token
-  - script: ./gradlew :loginui:publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
+  - script: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
     displayName: Publish authui (release) to android-packages
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
