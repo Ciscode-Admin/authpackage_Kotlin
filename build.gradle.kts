@@ -80,4 +80,5 @@ dependencies {
     implementation("com.microsoft.identity.client:msal:5.7.0") {
         exclude(group = "com.microsoft.device.display", module = "display-mask")
     }
+    implementation("androidx.browser:browser:1.7.0")
 }
