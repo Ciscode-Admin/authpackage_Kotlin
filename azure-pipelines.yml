@@ -41,15 +41,15 @@ steps:
       "platforms;android-35" "build-tools;35.0.0" "platform-tools"
   displayName: Ensure Android SDK 35 is installed
 
-# ---- RUN UNIT TESTS (fail fast) ----
-- bash: ./gradlew clean :loginui:testReleaseUnitTest --stacktrace --no-daemon
-  displayName: Run unit tests (loginui)
+# ---- RUN UNIT TESTS (debug, verbose) ----
+- bash: ./gradlew clean :loginui:testDebugUnitTest --stacktrace --info --no-daemon
+  displayName: Run unit tests (loginui, debug, verbose)
 
 - task: PublishTestResults@2
   displayName: Publish JUnit results
   inputs:
     testResultsFormat: 'JUnit'
-    testResultsFiles: 'loginui/build/test-results/testReleaseUnitTest/*.xml'
+    testResultsFiles: 'loginui/build/test-results/testDebugUnitTest/*.xml'
     searchFolder: '$(System.DefaultWorkingDirectory)'
     failTaskOnFailedTests: true
 
@@ -79,7 +79,7 @@ steps:
     STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
     echo "HEAD status: ${STATUS}"
 
-    if [ "${STATUS}" = "200" ]; then
+    if [ "${STATUS}" = "200" ] ; then
       echo "Artifact already exists in feed. Skipping publish."
       echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
     else
