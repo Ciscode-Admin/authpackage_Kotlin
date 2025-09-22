@@ -1,104 +1,132 @@
 trigger:
-- main
+  - main
 
 pool:
   vmImage: ubuntu-latest
 
 variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  # Optional: set these as secret variables in your pipeline/library
+  # SONAR_HOST_URL:  https://sonarcloud.io  OR  https://<your-sonarqube-server>
+  # SONAR_TOKEN:     <your_token>
+  # SONAR_PROJECT_KEY: pkg-android-auth   (or any key you want)
+  # SONAR_ORG:       <your_org_key>       # SonarCloud only
 
 steps:
   # Full clone so Gradle can read tags if needed
-- checkout: self
-  fetchDepth: 0
+  - checkout: self
+    fetchDepth: 0
 
-# Use JDK 21 (works with Gradle 8.x / AGP 8.x)
-- task: JavaToolInstaller@0
-  inputs:
-    versionSpec: '21'
-    jdkArchitectureOption: 'x64'
-    jdkSourceOption: 'PreInstalled'
-  displayName: Use Java 21
+  # Use JDK 21 (works with Gradle 8.x / AGP 8.x)
+  - task: JavaToolInstaller@0
+    inputs:
+      versionSpec: '21'
+      jdkArchitectureOption: 'x64'
+      jdkSourceOption: 'PreInstalled'
+    displayName: Use Java 21
 
-# Make wrapper executable
-- script: chmod +x ./gradlew
-  displayName: Make gradlew executable
+  # Make wrapper executable
+  - script: chmod +x ./gradlew
+    displayName: Make gradlew executable
 
-# Cache Gradle artifacts (note: $(HOME), not ~)
-- task: Cache@2
-  displayName: Cache Gradle
-  inputs:
-    key: 'gradle | "$(Agent.OS)" | **/gradle-wrapper.properties'
-    restoreKeys: |
-      gradle | "$(Agent.OS)"
-    path: '$(HOME)/.gradle/caches'
+  # Cache Gradle artifacts (note: $(HOME), not ~)
+  - task: Cache@2
+    displayName: Cache Gradle
+    inputs:
+      key: 'gradle | "$(Agent.OS)" | **/gradle-wrapper.properties'
+      restoreKeys: |
+        gradle | "$(Agent.OS)"
+      path: '$(HOME)/.gradle/caches'
 
-# Ensure Android SDK 35 is available
-- bash: |
-    set -e
-    yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
-    "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-      "platforms;android-35" "build-tools;35.0.0" "platform-tools"
-  displayName: Ensure Android SDK 35 is installed
+  # Ensure Android SDK 35 is available
+  - bash: |
+      set -e
+      yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+      "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+        "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+    displayName: Ensure Android SDK 35 is installed
 
-# ---- RUN UNIT TESTS (root project, debug, verbose) ----
-- bash: ./gradlew clean :testDebugUnitTest --stacktrace --info --no-daemon
-  displayName: Run unit tests (debug, verbose)
+  # ---- RUN UNIT TESTS + COVERAGE (root project) ----
+  - bash: ./gradlew clean testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon
+    displayName: Run unit tests + coverage (debug, verbose)
 
-- task: PublishTestResults@2
-  displayName: Publish JUnit results
-  inputs:
-    testResultsFormat: 'JUnit'
-    testResultsFiles: 'build/test-results/testDebugUnitTest/*.xml'
-    searchFolder: '$(System.DefaultWorkingDirectory)'
-    failTaskOnFailedTests: true
+  # Publish test results
+  - task: PublishTestResults@2
+    displayName: Publish JUnit results
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: 'build/test-results/testDebugUnitTest/*.xml'
+      searchFolder: '$(System.DefaultWorkingDirectory)'
+      failTaskOnFailedTests: true
 
-# Build the release AAR (only runs if tests passed)
-- bash: ./gradlew :assembleRelease
-  displayName: Build release AAR
+  # Publish coverage summary to Azure Pipelines UI
+  - task: PublishCodeCoverageResults@2
+    displayName: Publish JaCoCo coverage
+    inputs:
+      codeCoverageTool: 'JaCoCo'
+      summaryFileLocation: '$(System.DefaultWorkingDirectory)/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml'
+      reportDirectory: '$(System.DefaultWorkingDirectory)/build/reports/jacoco/jacocoTestReport'
+      failIfCoverageEmpty: false
 
-# Check if the exact version already exists in the feed; set PUBLISH_NEEDED=true/false
-- bash: |
-    set -euo pipefail
+  # ---- SONAR ANALYSIS (skips if SONAR_TOKEN is empty) ----
+  - bash: |
+      set -e
+      ARGS="-Dsonar.projectKey=$(SONAR_PROJECT_KEY)"
+      if [ -n "$(SONAR_ORG)" ]; then ARGS="$ARGS -Dsonar.organization=$(SONAR_ORG)"; fi
+      ./gradlew sonarqube \
+        -Dsonar.host.url=$(SONAR_HOST_URL) \
+        -Dsonar.login=$(SONAR_TOKEN) \
+        $ARGS \
+        --stacktrace --no-daemon
+    displayName: Sonar analysis (Gradle)
+    condition: and(succeeded(), ne(variables.SONAR_TOKEN, ''))
 
-    # Parse coordinates from build.gradle.kts (root)
-    GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
-    VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
-    ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
+  # Build the release AAR (only runs if tests passed)
+  - bash: ./gradlew :assembleRelease
+    displayName: Build release AAR
 
-    if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
-      echo "Failed to parse GROUP/ARTIFACT/VERSION from build.gradle.kts"
-      echo "GROUP='${GROUP:-}', ARTIFACT='${ARTIFACT:-}', VERSION='${VERSION:-}'"
-      exit 1
-    fi
+  # Check if the exact version already exists in the feed; set PUBLISH_NEEDED=true/false
+  - bash: |
+      set -euo pipefail
+      
+      # Parse coordinates from build.gradle.kts (root)
+      GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
+      VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
+      ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
+      
+      if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
+        echo "Failed to parse GROUP/ARTIFACT/VERSION from build.gradle.kts"
+        echo "GROUP='${GROUP:-}', ARTIFACT='${ARTIFACT:-}', VERSION='${VERSION:-}'"
+        exit 1
+      fi
+      
+      GROUP_PATH=${GROUP//./\/}
+      URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.aar"
+      
+      echo "Checking if artifact exists: ${URL}"
+      STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
+      echo "HEAD status: ${STATUS}"
+      
+      if [ "${STATUS}" = "200" ] ; then
+        echo "Artifact already exists in feed. Skipping publish."
+        echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
+      else
+        echo "Artifact not found in feed. Will publish."
+        echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
+      fi
+    displayName: Check if version exists in feed
+    env:
+      AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
-    GROUP_PATH=${GROUP//./\/}
-    URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.aar"
+  # Publish to Azure Artifacts ONLY if not already present
+  - bash: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
+    displayName: Publish authui (release) to android-packages
+    condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'true'))
+    env:
+      AZURE_ARTIFACTS_USERNAME: 'azdo'
+      AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
-    echo "Checking if artifact exists: ${URL}"
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
-    echo "HEAD status: ${STATUS}"
-
-    if [ "${STATUS}" = "200" ] ; then
-      echo "Artifact already exists in feed. Skipping publish."
-      echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
-    else
-      echo "Artifact not found in feed. Will publish."
-      echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
-    fi
-  displayName: Check if version exists in feed
-  env:
-    AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
-
-# Publish to Azure Artifacts ONLY if not already present
-- bash: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
-  displayName: Publish authui (release) to android-packages
-  condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'true'))
-  env:
-    AZURE_ARTIFACTS_USERNAME: 'azdo'
-    AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
-
-# Friendly message when publish is skipped
-- bash: echo "Publish skipped (same version already present)."
-  displayName: Skip note
-  condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
+  # Friendly message when publish is skipped
+  - bash: echo "Publish skipped (same version already present)."
+    displayName: Skip note
+    condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
