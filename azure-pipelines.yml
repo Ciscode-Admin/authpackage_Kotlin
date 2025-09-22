@@ -41,8 +41,20 @@ steps:
       "platforms;android-35" "build-tools;35.0.0" "platform-tools"
   displayName: Ensure Android SDK 35 is installed
 
-# Build the release AAR (optional to skip, but keeps CI verifying the code)
-- bash: ./gradlew clean :assembleRelease
+# ---- RUN UNIT TESTS (fail fast) ----
+- bash: ./gradlew clean :loginui:testReleaseUnitTest --stacktrace --no-daemon
+  displayName: Run unit tests (loginui)
+
+- task: PublishTestResults@2
+  displayName: Publish JUnit results
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: 'loginui/build/test-results/testReleaseUnitTest/*.xml'
+    searchFolder: '$(System.DefaultWorkingDirectory)'
+    failTaskOnFailedTests: true
+
+# Build the release AAR (only runs if tests passed)
+- bash: ./gradlew :assembleRelease
   displayName: Build release AAR
 
 # Check if the exact version already exists in the feed; set PUBLISH_NEEDED=true/false
