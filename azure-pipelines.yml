@@ -41,15 +41,15 @@ steps:
       "platforms;android-35" "build-tools;35.0.0" "platform-tools"
   displayName: Ensure Android SDK 35 is installed
 
-# ---- RUN UNIT TESTS (debug, verbose) ----
-- bash: ./gradlew clean :loginui:testDebugUnitTest --stacktrace --info --no-daemon
-  displayName: Run unit tests (loginui, debug, verbose)
+# ---- RUN UNIT TESTS (root project, debug, verbose) ----
+- bash: ./gradlew clean :testDebugUnitTest --stacktrace --info --no-daemon
+  displayName: Run unit tests (debug, verbose)
 
 - task: PublishTestResults@2
   displayName: Publish JUnit results
   inputs:
     testResultsFormat: 'JUnit'
-    testResultsFiles: 'loginui/build/test-results/testDebugUnitTest/*.xml'
+    testResultsFiles: 'build/test-results/testDebugUnitTest/*.xml'
     searchFolder: '$(System.DefaultWorkingDirectory)'
     failTaskOnFailedTests: true
 
