@@ -51,20 +51,29 @@ steps:
     condition: always()
     inputs:
       testResultsFormat: 'JUnit'
-      testResultsFiles: '**/testDebugUnitTest/*.xml'
+      testResultsFiles: '**/build/test-results/testDebugUnitTest/*.xml'
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
 
   # ---- SONARQUBE ANALYSIS (self-hosted) ----
-  # Define these pipeline variables in Azure DevOps:
-  #   SONAR_HOST_URL   -> e.g. https://sonarqube.mycompany.internal
-  #   SONAR_TOKEN      -> a SonarQube user token (secret)
+  # Define pipeline variables in Azure DevOps:
+  #   SONAR_HOST_URL = https://your.sonarqube.server
+  #   SONAR_TOKEN    = <user token>  (secret)
   - bash: |
+      set -euo pipefail
+      if [ -z "${SONAR_HOST_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then
+        echo "ERROR: SONAR_HOST_URL and/or SONAR_TOKEN not set as pipeline variables."
+        exit 1
+      fi
+      echo "Running SonarQube analysis against: $SONAR_HOST_URL"
       ./gradlew sonarqube \
-        -Dsonar.host.url="$(SONAR_HOST_URL)" \
-        -Dsonar.login="$(SONAR_TOKEN)" \
+        -Dsonar.host.url="$SONAR_HOST_URL" \
+        -Dsonar.login="$SONAR_TOKEN" \
         --stacktrace --no-daemon
     displayName: Run SonarQube analysis
+    env:
+      SONAR_HOST_URL: $(SONAR_HOST_URL)
+      SONAR_TOKEN: $(SONAR_TOKEN)
 
   # Build the release AAR (only runs if tests+analysis step succeeded)
   - bash: ./gradlew :assembleRelease
