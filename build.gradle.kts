@@ -35,6 +35,9 @@ android {
             withSourcesJar()
         }
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 group = "com.ciscod.android"
@@ -80,4 +83,11 @@ dependencies {
     implementation("com.microsoft.identity.client:msal:5.7.0") {
         exclude(group = "com.microsoft.device.display", module = "display-mask")
     }
+    implementation("androidx.browser:browser:1.7.0")
+    testImplementation("org.robolectric:robolectric:4.16")
+    testImplementation("org.mockito:mockito-core:5.19.0")
+    testImplementation("org.mockito.kotlin:mockito-kotlin:6.0.0")
+    testImplementation("androidx.test:core:1.7.0")
+    testImplementation("androidx.fragment:fragment-testing:1.8.3")
+    testImplementation("androidx.test.ext:junit:1.2.1")
 }
