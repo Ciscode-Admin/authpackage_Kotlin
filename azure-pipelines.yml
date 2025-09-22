@@ -6,11 +6,6 @@ pool:
 
 variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-  # Optional: set these as secret variables in your pipeline/library
-  # SONAR_HOST_URL:  https://sonarcloud.io  OR  https://<your-sonarqube-server>
-  # SONAR_TOKEN:     <your_token>
-  # SONAR_PROJECT_KEY: pkg-android-auth   (or any key you want)
-  # SONAR_ORG:       <your_org_key>       # SonarCloud only
 
 steps:
   # Full clone so Gradle can read tags if needed
@@ -29,7 +24,7 @@ steps:
   - script: chmod +x ./gradlew
     displayName: Make gradlew executable
 
-  # Cache Gradle artifacts (note: $(HOME), not ~)
+  # Cache Gradle artifacts
   - task: Cache@2
     displayName: Cache Gradle
     inputs:
@@ -46,11 +41,10 @@ steps:
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
     displayName: Ensure Android SDK 35 is installed
 
-  # ---- RUN UNIT TESTS + COVERAGE (root project) ----
-  - bash: ./gradlew clean testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon
-    displayName: Run unit tests + coverage (debug, verbose)
+  # ---- RUN UNIT TESTS + COVERAGE ----
+  - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon
+    displayName: Run unit tests (debug) + coverage
 
-  # Publish test results
   - task: PublishTestResults@2
     displayName: Publish JUnit results
     inputs:
@@ -59,29 +53,18 @@ steps:
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
 
-  # Publish coverage summary to Azure Pipelines UI
-  - task: PublishCodeCoverageResults@2
-    displayName: Publish JaCoCo coverage
-    inputs:
-      codeCoverageTool: 'JaCoCo'
-      summaryFileLocation: '$(System.DefaultWorkingDirectory)/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml'
-      reportDirectory: '$(System.DefaultWorkingDirectory)/build/reports/jacoco/jacocoTestReport'
-      failIfCoverageEmpty: false
-
-  # ---- SONAR ANALYSIS (skips if SONAR_TOKEN is empty) ----
+  # ---- SONARQUBE ANALYSIS (self-hosted) ----
+  # Define these pipeline variables in Azure DevOps:
+  #   SONAR_HOST_URL   -> e.g. https://sonarqube.mycompany.internal
+  #   SONAR_TOKEN      -> a SonarQube user token (secret)
   - bash: |
-      set -e
-      ARGS="-Dsonar.projectKey=$(SONAR_PROJECT_KEY)"
-      if [ -n "$(SONAR_ORG)" ]; then ARGS="$ARGS -Dsonar.organization=$(SONAR_ORG)"; fi
       ./gradlew sonarqube \
-        -Dsonar.host.url=$(SONAR_HOST_URL) \
-        -Dsonar.login=$(SONAR_TOKEN) \
-        $ARGS \
+        -Dsonar.host.url="$(SONAR_HOST_URL)" \
+        -Dsonar.login="$(SONAR_TOKEN)" \
         --stacktrace --no-daemon
-    displayName: Sonar analysis (Gradle)
-    condition: and(succeeded(), ne(variables.SONAR_TOKEN, ''))
+    displayName: Run SonarQube analysis
 
-  # Build the release AAR (only runs if tests passed)
+  # Build the release AAR (only runs if tests+analysis step succeeded)
   - bash: ./gradlew :assembleRelease
     displayName: Build release AAR
 
