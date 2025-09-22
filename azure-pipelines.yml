@@ -42,14 +42,16 @@ steps:
     displayName: Ensure Android SDK 35 is installed
 
   # ---- RUN UNIT TESTS + COVERAGE ----
-  - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon
+  # Allow the job to continue so the reports can be published.
+  - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
   - task: PublishTestResults@2
     displayName: Publish JUnit results
+    condition: always()
     inputs:
       testResultsFormat: 'JUnit'
-      testResultsFiles: 'build/test-results/testDebugUnitTest/*.xml'
+      testResultsFiles: '**/testDebugUnitTest/*.xml'
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
 
@@ -71,25 +73,25 @@ steps:
   # Check if the exact version already exists in the feed; set PUBLISH_NEEDED=true/false
   - bash: |
       set -euo pipefail
-      
+
       # Parse coordinates from build.gradle.kts (root)
       GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
       VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
       ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
-      
+
       if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
         echo "Failed to parse GROUP/ARTIFACT/VERSION from build.gradle.kts"
         echo "GROUP='${GROUP:-}', ARTIFACT='${ARTIFACT:-}', VERSION='${VERSION:-}'"
         exit 1
       fi
-      
+
       GROUP_PATH=${GROUP//./\/}
       URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.aar"
-      
+
       echo "Checking if artifact exists: ${URL}"
       STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
       echo "HEAD status: ${STATUS}"
-      
+
       if [ "${STATUS}" = "200" ] ; then
         echo "Artifact already exists in feed. Skipping publish."
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
