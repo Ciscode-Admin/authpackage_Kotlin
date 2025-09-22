@@ -2,9 +2,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     id("maven-publish")
-
-    // ⬇️ Add these two
-    id("org.sonarqube") version "4.4.1.3373"
+    id("org.sonarqube") version "5.1.0.4882" // SonarQube Gradle plugin
     jacoco
 }
 
@@ -26,19 +24,33 @@ android {
                 "proguard-rules.pro"
             )
         }
+        debug {
+            // keep debug so we can point Sonar to debug outputs
+        }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions { jvmTarget = "11" }
-
-    publishing {
-        singleVariant("release") { withSourcesJar() }
+    kotlinOptions {
+        jvmTarget = "11"
     }
 
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+    }
+
+    // Use the same JaCoCo version everywhere
+    testOptions.unitTests.all {
+        it.extensions.configure<JacocoTaskExtension> {
+            isIncludeNoLocationClasses = true
+        }
     }
 }
 
@@ -82,7 +94,6 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-moshi:2.9.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.9.0")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
-
     implementation("com.microsoft.identity.client:msal:5.7.0") {
         exclude(group = "com.microsoft.device.display", module = "display-mask")
     }
@@ -96,88 +107,77 @@ dependencies {
     testImplementation("androidx.test.ext:junit:1.2.1")
 }
 
-/* ---------- Code coverage (Jacoco) ---------- */
+/* ---------- JaCoCo coverage for unit tests ---------- */
 jacoco {
-    // Java 21 compatible
-    toolVersion = "0.8.11"
+    toolVersion = "0.8.12"
 }
 
-// Report for JVM unit tests (Debug)
+val excludedClasses = listOf(
+    // android/generated
+    "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
+    // Dagger/Hilt / MembersInjector etc.
+    "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*",
+    "**/*_Factory*.*", "**/*_Provide*Factory*.*",
+    // Kotlin synthetics/companions
+    "**/*Companion*.*", "**/*Module*.*",
+    // ViewBinding/DataBinding
+    "**/*Binding.*", "**/*BindingImpl.*",
+    // Jetpack Compose (if any)
+    "**/*ComposableSingletons*.*"
+    // NOTE: classic ButterKnife pattern left out; if you need it, escape $ like: "**/*\\$ViewInjector*.*"
+)
+
 tasks.register<JacocoReport>("jacocoTestReport") {
     dependsOn("testDebugUnitTest")
 
     reports {
         xml.required.set(true)
         html.required.set(true)
+        csv.required.set(false)
     }
 
-    val javaClasses = fileTree("$buildDir/intermediates/javac/debug/classes") {
-        exclude(
-            "**/R.class",
-            "**/R\$*.class",
-            "**/BuildConfig.*",
-            "**/Manifest*.*",
-            "**/*\$ViewInjector*.*",
-            "**/*_MembersInjector*.*",
-            "**/*_Factory*.*",
-            "**/*\$Companion*"
-        )
+    val javaDebug = fileTree("${buildDir}/intermediates/javac/debug/classes") {
+        exclude(excludedClasses)
+    }
+    val kotlinDebug = fileTree("${buildDir}/tmp/kotlin-classes/debug") {
+        exclude(excludedClasses)
     }
 
-    val kotlinClasses = fileTree("$buildDir/tmp/kotlin-classes/debug") {
-        exclude(
-            "**/R.class",
-            "**/R\$*.class",
-            "**/BuildConfig.*",
-            "**/Manifest*.*",
-            "**/*\$ViewInjector*.*",
-            "**/*_MembersInjector*.*",
-            "**/*_Factory*.*",
-            "**/*\$Companion*"
-        )
-    }
-
-    classDirectories.setFrom(javaClasses, kotlinClasses)
-
+    classDirectories.setFrom(files(javaDebug, kotlinDebug))
     sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
-
-    // Pick up execution data robustly (AGP can place it in different spots)
     executionData.setFrom(
         fileTree(buildDir) {
             include(
                 "jacoco/testDebugUnitTest.exec",
                 "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec",
-                "jacoco/test.exec"
+                "**/jacoco/*.exec",
+                "**/*.ec"
             )
         }
     )
 }
 
-/* ---------- SonarQube ---------- */
+/* ---------- SonarQube configuration ---------- */
 sonarqube {
     properties {
-        // CHANGE these to match your SonarQube project
-        property("sonar.projectKey", "pkg-android-auth:authui")
-        property("sonar.projectName", "authui")
-        property("sonar.projectVersion", version.toString())
+        // basic identity (you can override via -D if you prefer)
+        property("sonar.projectKey", "pkg-android-auth")
+        property("sonar.projectName", "pkg-android-auth")
 
-        // Sources/tests
-        property("sonar.sources", "src/main/java,src/main/kotlin")
-        property("sonar.tests", "src/test/java,src/test/kotlin")
-        property("sonar.exclusions", "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*")
+        // sources & tests
+        property("sonar.sources", listOf("src/main/java", "src/main/kotlin", "src/main/res").joinToString(","))
+        property("sonar.tests", listOf("src/test/java", "src/test/kotlin").joinToString(","))
 
-        // Binaries (both Java & Kotlin output for Debug)
-        property("sonar.java.binaries",
-            "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug"
-        )
+        // binaries for rule engines (point at debug classes)
+        property("sonar.java.binaries", "${project.buildDir}/tmp/kotlin-classes/debug,${project.buildDir}/intermediates/javac/debug/classes")
 
-        // JUnit & Lint reports
-        property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
-        property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
+        // reports
+        property("sonar.junit.reportPaths", "${project.buildDir}/test-results/testDebugUnitTest")
+        property("sonar.androidLint.reportPaths", "${project.buildDir}/reports/lint-results-debug.xml")
+        property("sonar.coverage.jacoco.xmlReportPaths", "${project.buildDir}/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
 
-        // Jacoco XML report
-        property("sonar.coverage.jacoco.xmlReportPaths",
-            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
-        )
+        // Optional: narrow file suffixes
+        property("sonar.java.source", "11")
+        property("sonar.kotlin.detekt.reportPaths", "") // not using detekt yet
     }
 }
