@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     id("maven-publish")
+    id("org.sonarqube") version "4.4.1.3373"
+    jacoco
 }
 
 android {
@@ -42,6 +44,87 @@ android {
 
 group = "com.ciscod.android"
 version = "0.1.0"
+
+/** JaCoCo setup for Android unit tests */
+jacoco {
+    toolVersion = "0.8.12"
+}
+
+// Create a coverage report from the Android unit test task
+// Output: build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml
+tasks.register<JacocoReport>("jacocoTestReport") {
+    dependsOn("testDebugUnitTest")
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+
+    val debugTree = fileTree(mapOf(
+        "dir" to "$buildDir/tmp/kotlin-classes/debug",
+        "includes" to listOf("**/*.class"),
+        "excludes" to listOf(
+            // common noise filters; tweak as you wish
+            "**/*\$*",
+            "**/R.class", "**/R\$*.class",
+            "**/BuildConfig.*",
+            "**/Manifest*.*"
+        )
+    ))
+
+    classDirectories.setFrom(debugTree)
+
+    sourceDirectories.setFrom(files(
+        "src/main/java",
+        "src/main/kotlin"
+    ))
+
+    executionData.setFrom(fileTree(buildDir).include(
+        "jacoco/testDebugUnitTest.exec",
+        "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec"
+    ))
+}
+
+/** Sonar config — works for SonarQube or SonarCloud */
+sonarqube {
+    properties {
+        // Read from Gradle/system properties first, then env (pipeline passes -Dsonar.*; env is fallback)
+        val hostUrl = (findProperty("sonar.host.url") as String?)
+            ?: System.getenv("SONAR_HOST_URL")
+        val token = (findProperty("sonar.login") as String?)
+            ?: System.getenv("SONAR_TOKEN")
+        val projectKey = (findProperty("sonar.projectKey") as String?)
+            ?: System.getenv("SONAR_PROJECT_KEY")
+        val organization = (findProperty("sonar.organization") as String?)
+            ?: System.getenv("SONAR_ORG") // SonarCloud only
+
+        if (!hostUrl.isNullOrBlank()) property("sonar.host.url", hostUrl)
+        if (!token.isNullOrBlank()) property("sonar.login", token)
+        if (!projectKey.isNullOrBlank()) property("sonar.projectKey", projectKey)
+        if (!organization.isNullOrBlank()) property("sonar.organization", organization)
+
+        // Basic metadata
+        property("sonar.projectName", "pkg-android-auth")
+        property("sonar.sourceEncoding", "UTF-8")
+        property("sonar.language", "kotlin")
+
+        // What to analyze
+        property("sonar.sources", "src/main/java,src/main/kotlin")
+        property("sonar.tests", "src/test/java,src/test/kotlin")
+
+        // Test reports (JUnit)
+        property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
+
+        // Coverage (JaCoCo XML)
+        property("sonar.coverage.jacoco.xmlReportPaths",
+            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
+
+        // Keep the noise down
+        property("sonar.exclusions",
+            "**/R.class,**/R$*.class,**/BuildConfig.*,**/Manifest*.*,**/*Test*.*,**/*.png,**/*.jpg,**/*.json")
+        property("sonar.test.exclusions", "**/androidTest/**")
+    }
+}
 
 publishing {
     repositories {
