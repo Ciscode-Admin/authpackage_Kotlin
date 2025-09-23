@@ -168,7 +168,7 @@ sonarqube {
         property("sonar.host.url", "https://sonarcloud.io")
 
         // Sources / tests
-        property("sonar.sources", "src/main/java,src/main/kotlin")
+        property("sonar.sources", "src/main/java")
         property("sonar.tests", "src/test/java") // removed src/test/kotlin (it doesn't exist)
 
         // Exclusions
