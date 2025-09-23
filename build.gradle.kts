@@ -160,24 +160,34 @@ tasks.register<JacocoReport>("jacocoTestReport") {
 /* ---------- SonarQube configuration ---------- */
 sonarqube {
     properties {
-        // basic identity (you can override via -D if you prefer)
-        property("sonar.projectKey", "pkg-android-auth")
+        // SonarCloud identifiers
+        property("sonar.organization", "ciscode")
+        property("sonar.projectKey", "CISCODEAPPS_pkg-android-auth")
         property("sonar.projectName", "pkg-android-auth")
+        property("sonar.projectVersion", version.toString())
+        property("sonar.host.url", "https://sonarcloud.io")
 
-        // sources & tests
-        property("sonar.sources", listOf("src/main/java", "src/main/kotlin", "src/main/res").joinToString(","))
-        property("sonar.tests", listOf("src/test/java", "src/test/kotlin").joinToString(","))
+        // Sources / tests
+        property("sonar.sources", "src/main/java,src/main/kotlin")
+        property("sonar.tests", "src/test/java") // removed src/test/kotlin (it doesn't exist)
 
-        // binaries for rule engines (point at debug classes)
-        property("sonar.java.binaries", "${project.buildDir}/tmp/kotlin-classes/debug,${project.buildDir}/intermediates/javac/debug/classes")
+        // Exclusions
+        property("sonar.exclusions", "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*")
 
-        // reports
-        property("sonar.junit.reportPaths", "${project.buildDir}/test-results/testDebugUnitTest")
-        property("sonar.androidLint.reportPaths", "${project.buildDir}/reports/lint-results-debug.xml")
-        property("sonar.coverage.jacoco.xmlReportPaths", "${project.buildDir}/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
+        // Binaries (Debug)
+        property(
+            "sonar.java.binaries",
+            "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug"
+        )
 
-        // Optional: narrow file suffixes
-        property("sonar.java.source", "11")
-        property("sonar.kotlin.detekt.reportPaths", "") // not using detekt yet
+        // Test & Lint reports
+        property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
+        property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
+
+        // Jacoco XML report
+        property(
+            "sonar.coverage.jacoco.xmlReportPaths",
+            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
+        )
     }
 }
