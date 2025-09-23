@@ -12,17 +12,17 @@ steps:
     fetchDepth: 0
 
   - task: JavaToolInstaller@0
+    displayName: Use Java 21
     inputs:
       versionSpec: '21'
-      jdkArchitectureOption: 'x64'
-      jdkSourceOption: 'PreInstalled'
-    displayName: 'Use Java 21'
+      jdkArchitectureOption: x64
+      jdkSourceOption: PreInstalled
 
   - script: chmod +x ./gradlew
-    displayName: 'Make gradlew executable'
+    displayName: Make gradlew executable
 
   - task: Cache@2
-    displayName: 'Cache Gradle'
+    displayName: Cache Gradle
     inputs:
       key: 'gradle | "$(Agent.OS)" | **/gradle-wrapper.properties'
       restoreKeys: |
@@ -34,11 +34,11 @@ steps:
       yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
       "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
-    displayName: 'Ensure Android SDK 35 is installed'
+    displayName: Ensure Android SDK 35 is installed
 
-  # Prepare SonarCloud (service connection name must match)
+  # Prepare SonarCloud (service connection name must match your created connection)
   - task: SonarCloudPrepare@1
-    displayName: 'Prepare SonarCloud analysis'
+    displayName: Prepare SonarCloud analysis
     inputs:
       SonarCloud: 'Sonarqube Cloud'
       organization: 'ciscode'
@@ -46,13 +46,13 @@ steps:
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # Run tests + generate coverage XML
+  # Run JVM unit tests + produce JaCoCo XML
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
-    displayName: 'Run unit tests (debug) + coverage'
+    displayName: Run unit tests (debug) + coverage
 
-  # Publish test results so you can see counts/failures in the run
+  # Publish JUnit to see test counts/failures in the run
   - task: PublishTestResults@2
-    displayName: 'Publish JUnit results'
+    displayName: Publish JUnit results
     condition: always()
     inputs:
       testResultsFormat: 'JUnit'
@@ -60,70 +60,114 @@ steps:
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
 
-  # Assert the JaCoCo XML exists (fail here if missing)
+  # Locate coverage XML and build an exact binaries list for Sonar
   - bash: |
-      set -e
-      FILE="build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
-      if [ ! -s "$FILE" ]; then
-        echo "COVERAGE XML NOT FOUND or EMPTY: $FILE"
-        echo "Nearby files:"
-        ls -la build/reports/jacoco || true
-        ls -la build/reports/jacoco/jacocoTestReport || true
+      set -euo pipefail
+
+      # 1) Resolve JaCoCo XML
+      XML_DEFAULT="build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
+      if [ -f "$XML_DEFAULT" ]; then
+        COV_XML="$XML_DEFAULT"
+      else
+        # Try to find any jacoco XML as a fallback
+        COV_XML="$(find "$PWD" -type f -name 'jacocoTestReport.xml' | head -n 1 || true)"
+      fi
+      echo "Coverage XML: ${COV_XML:-<none>}"
+      if [ -z "${COV_XML:-}" ] || [ ! -f "$COV_XML" ]; then
+        echo "ERROR: JaCoCo XML not found. Failing fast to avoid 0% coverage import."
         exit 1
       fi
-      echo "Found coverage XML ($(wc -c < "$FILE") bytes): $FILE"
-    displayName: 'Assert JaCoCo XML exists'
+      echo "##vso[task.setvariable variable=COVERAGE_XML]$COV_XML"
 
-  # (Optional) Upload the coverage XML as a pipeline artifact for debugging
+      # 2) Build sonar.sources dynamically (include kotlin if present)
+      SRC="src/main/java"
+      if [ -d "src/main/kotlin" ]; then
+        SRC="$SRC,src/main/kotlin"
+      fi
+      echo "Sources: $SRC"
+      echo "##vso[task.setvariable variable=SONAR_SOURCES]$SRC"
+
+      # 3) Discover all relevant debug class outputs for AGP 8.x
+      #    Directories:
+      BIN_DIRS=()
+      [ -d "build/intermediates/javac/debug/classes" ] && BIN_DIRS+=("build/intermediates/javac/debug/classes")
+      [ -d "build/tmp/kotlin-classes/debug" ] && BIN_DIRS+=("build/tmp/kotlin-classes/debug")
+
+      #    classes.jar artifacts:
+      mapfile -t JARS < <(find build/intermediates -type f -name classes.jar 2>/dev/null || true)
+
+      # Compose comma-separated list for Sonar
+      BIN_LIST=""
+      for p in "${BIN_DIRS[@]}"; do
+        if [ -z "$BIN_LIST" ]; then BIN_LIST="$p"; else BIN_LIST="$BIN_LIST,$p"; fi
+      done
+      for j in "${JARS[@]}"; do
+        if [ -z "$BIN_LIST" ]; then BIN_LIST="$j"; else BIN_LIST="$BIN_LIST,$j"; fi
+      done
+
+      echo "Sonar binaries:"
+      echo "$BIN_LIST" | tr ',' '\n'
+
+      if [ -z "$BIN_LIST" ]; then
+        echo "WARNING: No class files found. Coverage cannot be mapped."
+      fi
+
+      echo "##vso[task.setvariable variable=SONAR_BINARIES]$BIN_LIST"
+    displayName: Discover coverage XML and binaries
+
+  # (Optional) Attach the XML so you can open it from the run
   - task: PublishBuildArtifacts@1
-    displayName: 'Attach jacoco XML (debugging)'
+    displayName: Attach jacoco XML (debugging)
     condition: always()
     inputs:
-      PathtoPublish: 'build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml'
+      PathtoPublish: '$(COVERAGE_XML)'
       ArtifactName: 'coverage-xml'
       publishLocation: 'Container'
 
-  # Run the Sonar analysis (Gradle 'sonarqube' dependsOn jacocoTestReport in build.gradle)
-  - bash: ./gradlew sonarqube --stacktrace --no-daemon
-    displayName: 'Run SonarCloud analysis (Gradle)'
+  # Run Sonar with explicit, discovered inputs (this is the key)
+  - bash: |
+      set -e
+      ./gradlew sonarqube \
+        -Dsonar.sources="$(SONAR_SOURCES)" \
+        -Dsonar.tests="src/test/java" \
+        -Dsonar.java.binaries="$(SONAR_BINARIES)" \
+        -Dsonar.coverage.jacoco.xmlReportPaths="$(COVERAGE_XML)" \
+        --stacktrace --no-daemon
+    displayName: Run SonarCloud analysis (Gradle)
 
   - task: SonarCloudPublish@1
-    displayName: 'Publish SonarCloud Quality Gate'
+    displayName: Publish SonarCloud Quality Gate
     inputs:
       pollingTimeoutSec: '300'
 
   - bash: ./gradlew :assembleRelease
-    displayName: 'Build release AAR'
+    displayName: Build release AAR
 
   - bash: |
       set -euo pipefail
       GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
       VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
       ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
-      if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
-        echo "Failed to parse GROUP/ARTIFACT/VERSION from build.gradle.kts"
-        exit 1
-      fi
+      [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ] && { echo "POM coords not found"; exit 1; }
       GROUP_PATH=${GROUP//./\/}
       URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.aar"
-      echo "Checking ${URL}"
       STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
       if [ "${STATUS}" = "200" ]; then
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
       else
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
       fi
-    displayName: 'Check if version exists in feed'
+    displayName: Check if version exists in feed
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
   - bash: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
-    displayName: 'Publish authui (release) to android-packages'
+    displayName: Publish authui (release) to android-packages
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'true'))
     env:
       AZURE_ARTIFACTS_USERNAME: 'azdo'
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
   - bash: echo "Publish skipped (same version already present)."
-    displayName: 'Skip note'
+    displayName: Skip note
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
