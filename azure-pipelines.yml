@@ -56,6 +56,16 @@ steps:
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
+  # (NEW) Debug step: locate Jacoco XML so Sonar can read it
+  - bash: |
+      echo "Searching for Jacoco XML..."
+      set -x
+      find "$PWD" -type f -name "jacocoTestReport.xml" 2>/dev/null | sort || true
+      echo "List candidate dirs:"
+      ls -la build/reports/jacoco || true
+      ls -la build/reports/jacoco/jacocoTestReport || true
+    displayName: Debug: locate Jacoco XML
+
   # ---- SONARCLOUD: RUN ANALYSIS VIA GRADLE ----
   - bash: ./gradlew sonarqube --stacktrace --no-daemon
     displayName: Run SonarCloud analysis (Gradle)
