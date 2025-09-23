@@ -8,11 +8,9 @@ variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 steps:
-  # Full clone so Gradle can read tags if needed
   - checkout: self
     fetchDepth: 0
 
-  # Use JDK 21 (works with Gradle 8.x / AGP 8.x)
   - task: JavaToolInstaller@0
     inputs:
       versionSpec: '21'
@@ -20,11 +18,9 @@ steps:
       jdkSourceOption: 'PreInstalled'
     displayName: 'Use Java 21'
 
-  # Make wrapper executable
   - script: chmod +x ./gradlew
     displayName: 'Make gradlew executable'
 
-  # Cache Gradle artifacts
   - task: Cache@2
     displayName: 'Cache Gradle'
     inputs:
@@ -33,7 +29,6 @@ steps:
         gradle | "$(Agent.OS)"
       path: '$(HOME)/.gradle/caches'
 
-  # Ensure Android SDK 35 is available
   - bash: |
       set -e
       yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
@@ -41,79 +36,73 @@ steps:
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
     displayName: 'Ensure Android SDK 35 is installed'
 
-  # ---- SONARCLOUD: PREPARE ----
+  # Prepare SonarCloud (service connection name must match)
   - task: SonarCloudPrepare@1
     displayName: 'Prepare SonarCloud analysis'
     inputs:
-      SonarCloud: 'Sonarqube Cloud'   # service connection name
+      SonarCloud: 'Sonarqube Cloud'
       organization: 'ciscode'
-      scannerMode: 'Other'            # we run Gradle's 'sonarqube' task
+      scannerMode: 'Other'
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # ---- RUN UNIT TESTS + COVERAGE ----
-  # Allow the job to continue so the reports can be published.
+  # Run tests + generate coverage XML
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: 'Run unit tests (debug) + coverage'
 
-  # Debug step: locate Jacoco XML so Sonar can read it
-  - bash: |
-      echo "Searching for Jacoco XML..."
-      set -x
-      find "$PWD" -type f -name "jacocoTestReport.xml" 2>/dev/null | sort || true
-      echo "List candidate dirs:"
-      ls -la build/reports/jacoco || true
-      ls -la build/reports/jacoco/jacocoTestReport || true
-    displayName: 'Debug: locate Jacoco XML'   # <— quoted
+  # Publish test results so you can see counts/failures in the run
+  - task: PublishTestResults@2
+    displayName: 'Publish JUnit results'
+    condition: always()
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '**/build/test-results/testDebugUnitTest/*.xml'
+      searchFolder: '$(System.DefaultWorkingDirectory)'
+      failTaskOnFailedTests: true
 
-  # ---- SONARCLOUD: RUN ANALYSIS VIA GRADLE ----
+  # (Optional) Upload the coverage XML as a pipeline artifact for debugging
+  - task: PublishBuildArtifacts@1
+    displayName: 'Attach jacoco XML (debugging)'
+    condition: always()
+    inputs:
+      PathtoPublish: 'build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml'
+      ArtifactName: 'coverage-xml'
+      publishLocation: 'Container'
+
+  # Run the Sonar analysis (the Gradle task now dependsOn jacocoTestReport)
   - bash: ./gradlew sonarqube --stacktrace --no-daemon
     displayName: 'Run SonarCloud analysis (Gradle)'
 
-  # ---- SONARCLOUD: PUBLISH QUALITY GATE ----
   - task: SonarCloudPublish@1
     displayName: 'Publish SonarCloud Quality Gate'
     inputs:
       pollingTimeoutSec: '300'
 
-  # Build the release AAR (only runs if tests+analysis step succeeded)
   - bash: ./gradlew :assembleRelease
     displayName: 'Build release AAR'
 
-  # Check if the exact version already exists in the feed; set PUBLISH_NEEDED=true/false
   - bash: |
       set -euo pipefail
-
-      # Parse coordinates from build.gradle.kts (root)
       GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
       VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
       ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
-
       if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
         echo "Failed to parse GROUP/ARTIFACT/VERSION from build.gradle.kts"
-        echo "GROUP='${GROUP:-}', ARTIFACT='${ARTIFACT:-}', VERSION='${VERSION:-}'"
         exit 1
       fi
-
       GROUP_PATH=${GROUP//./\/}
       URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.aar"
-
-      echo "Checking if artifact exists: ${URL}"
+      echo "Checking ${URL}"
       STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
-      echo "HEAD status: ${STATUS}"
-
-      if [ "${STATUS}" = "200" ] ; then
-        echo "Artifact already exists in feed. Skipping publish."
+      if [ "${STATUS}" = "200" ]; then
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
       else
-        echo "Artifact not found in feed. Will publish."
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
       fi
     displayName: 'Check if version exists in feed'
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
-  # Publish to Azure Artifacts ONLY if not already present
   - bash: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
     displayName: 'Publish authui (release) to android-packages'
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'true'))
@@ -121,7 +110,6 @@ steps:
       AZURE_ARTIFACTS_USERNAME: 'azdo'
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
-  # Friendly message when publish is skipped
   - bash: echo "Publish skipped (same version already present)."
     displayName: 'Skip note'
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
