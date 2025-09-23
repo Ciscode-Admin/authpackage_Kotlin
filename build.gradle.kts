@@ -2,7 +2,9 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     id("maven-publish")
-    id("org.sonarqube") version "5.1.0.4882" // SonarQube Gradle plugin
+
+    // Sonar + coverage
+    id("org.sonarqube") version "5.1.0.4882"
     jacoco
 }
 
@@ -24,42 +26,36 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug {
-            // keep debug so we can point Sonar to debug outputs
-        }
+        debug { /* keep */ }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
+    kotlinOptions { jvmTarget = "11" }
 
     publishing {
-        singleVariant("release") {
-            withSourcesJar()
+        singleVariant("release") { withSourcesJar() }
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.jvmArgs(
+                "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+                "--add-opens=java.base/java.io=ALL-UNNAMED",
+                "--add-opens=java.base/java.util=ALL-UNNAMED",
+                "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+                "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+                "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+                "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
+                "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
+                "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+            )
         }
     }
-    testOptions {
-    unitTests.isIncludeAndroidResources = true
-
-    unitTests.all {
-        it.jvmArgs(
-            "--add-opens=java.base/java.lang=ALL-UNNAMED",
-            "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-            "--add-opens=java.base/java.io=ALL-UNNAMED",
-            "--add-opens=java.base/java.util=ALL-UNNAMED",
-            "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
-            "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
-            "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
-            "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
-            "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
-            "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
-        )
-    }
-}
 }
 
 group = "com.ciscod.android"
@@ -94,6 +90,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -116,38 +113,30 @@ dependencies {
 }
 
 /* ---------- JaCoCo coverage for unit tests ---------- */
-jacoco {
-    toolVersion = "0.8.12"
-}
+jacoco { toolVersion = "0.8.12" }
 
 val excludedClasses = listOf(
-    // android/generated
     "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
-    // Dagger/Hilt / MembersInjector etc.
     "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*",
     "**/*_Factory*.*", "**/*_Provide*Factory*.*",
-    // Kotlin synthetics/companions
     "**/*Companion*.*", "**/*Module*.*",
-    // ViewBinding/DataBinding
     "**/*Binding.*", "**/*BindingImpl.*",
-    // Jetpack Compose (if any)
     "**/*ComposableSingletons*.*"
-    // NOTE: classic ButterKnife pattern left out; if you need it, escape $ like: "**/*\\$ViewInjector*.*"
 )
 
 tasks.register<JacocoReport>("jacocoTestReport") {
     dependsOn("testDebugUnitTest")
 
     reports {
-        xml.required.set(true)
+        xml.required.set(true)      // Sonar needs this XML
         html.required.set(true)
         csv.required.set(false)
     }
 
-    val javaDebug = fileTree("${buildDir}/intermediates/javac/debug/classes") {
+    val javaDebug = fileTree("$buildDir/intermediates/javac/debug/classes") {
         exclude(excludedClasses)
     }
-    val kotlinDebug = fileTree("${buildDir}/tmp/kotlin-classes/debug") {
+    val kotlinDebug = fileTree("$buildDir/tmp/kotlin-classes/debug") {
         exclude(excludedClasses)
     }
 
@@ -165,37 +154,33 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     )
 }
 
-/* ---------- SonarQube configuration ---------- */
+tasks.named("sonarqube") {
+    dependsOn("jacocoTestReport")
+}
+
+/* ---------- SonarQube / SonarCloud ---------- */
 sonarqube {
     properties {
-        // SonarCloud identifiers
+        property("sonar.host.url", "https://sonarcloud.io")
         property("sonar.organization", "ciscode")
         property("sonar.projectKey", "CISCODEAPPS_pkg-android-auth")
         property("sonar.projectName", "pkg-android-auth")
         property("sonar.projectVersion", version.toString())
-        property("sonar.host.url", "https://sonarcloud.io")
 
-        // Sources / tests
-        property("sonar.sources", "src/main/java")
-        property("sonar.tests", "src/test/java") // removed src/test/kotlin (it doesn't exist)
+        // If you have Kotlin sources, include them too
+        property("sonar.sources", "src/main/java,src/main/kotlin")
+        property("sonar.tests", "src/test/java")
 
-        // Exclusions
-        property("sonar.exclusions", "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*")
+        // Do not exclude test files globally (avoid hiding coverage)
+        property("sonar.exclusions", "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*")
 
-        // Binaries (Debug)
-        property(
-            "sonar.java.binaries",
-            "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug"
-        )
+        property("sonar.java.binaries",
+            "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug")
 
-        // Test & Lint reports
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
         property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
 
-        // Jacoco XML report
-        property(
-            "sonar.coverage.jacoco.xmlReportPaths",
-            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
-        )
+        property("sonar.coverage.jacoco.xmlReportPaths",
+            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
     }
 }
