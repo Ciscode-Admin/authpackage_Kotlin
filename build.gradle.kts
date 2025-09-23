@@ -156,57 +156,43 @@ tasks.named("sonarqube") {
 }
 
 /* ---------- SonarQube / SonarCloud ---------- */
-fun existing(vararg paths: String) =
-    paths.filter { file(it).exists() }.joinToString(",")
-
 sonarqube {
     properties {
-        // --- required identifiers (unchanged) ---
+        // SonarCloud identifiers
         property("sonar.organization", "ciscode")
         property("sonar.projectKey", "CISCODEAPPS_pkg-android-auth")
         property("sonar.projectName", "pkg-android-auth")
         property("sonar.projectVersion", version.toString())
         property("sonar.host.url", "https://sonarcloud.io")
 
-        // --- sources / tests (keep java here since you have src/test/java) ---
-        property("sonar.sources", "src/main/java")
-        property("sonar.tests",   "src/test/java")
+        // Build the list of existing source / test dirs (so we don't fail if one is missing)
+        val sourceDirs = listOf("src/main/java", "src/main/kotlin").filter { file(it).exists() }
+        val testDirs   = listOf("src/test/java", "src/test/kotlin").filter { file(it).exists() }
 
-        // --- binaries (MAIN) -> include all AGP 8.x debug outputs + jars ---
+        property("sonar.sources", sourceDirs.joinToString(","))
+        property("sonar.tests",   testDirs.joinToString(","))
+
+        // Exclusions
+        property("sonar.exclusions",
+            "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*"
+        )
+
+        // Binaries (Debug)
         property(
             "sonar.java.binaries",
-            listOf(
-                "$buildDir/intermediates/javac/debug/classes",
-                "$buildDir/tmp/kotlin-classes/debug",
-                // AGP packs classes into jars; include both common jars
-                "$buildDir/intermediates/compile_library_classes_jar/debug/classes.jar",
-                "$buildDir/intermediates/aar_main_jar/debug/classes.jar"
-            ).joinToString(",")
+            "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug"
         )
 
-        // --- binaries (TEST) -> helps test detection & rule accuracy ---
-        property(
-            "sonar.java.test.binaries",
-            listOf(
-                "$buildDir/intermediates/javac/debugUnitTest/classes",
-                "$buildDir/tmp/kotlin-classes/debugUnitTest"
-            ).joinToString(",")
-        )
-
-        // --- reports ---
+        // JUnit reports
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
+
+        // (Optional) If you don’t run Android Lint, drop this to remove the warning
+        // property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
+
+        // JaCoCo XML report produced by the jacocoTestReport task
         property(
             "sonar.coverage.jacoco.xmlReportPaths",
             "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
-        )
-
-        // optional; fine to keep
-        property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
-
-        // keep your exclusions if you want, they don't affect coverage import
-        property(
-            "sonar.exclusions",
-            "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*"
         )
     }
 }
