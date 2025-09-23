@@ -115,30 +115,28 @@ dependencies {
 /* ---------- JaCoCo coverage for unit tests ---------- */
 jacoco { toolVersion = "0.8.12" }
 
-val excludedClasses = listOf(
-    "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
-    "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*",
-    "**/*_Factory*.*", "**/*_Provide*Factory*.*",
-    "**/*Companion*.*", "**/*Module*.*",
-    "**/*Binding.*", "**/*BindingImpl.*",
-    "**/*ComposableSingletons*.*"
-)
-
 tasks.register<JacocoReport>("jacocoTestReport") {
     dependsOn("testDebugUnitTest")
 
     reports {
-        xml.required.set(true)      // Sonar needs this XML
+        xml.required.set(true)
         html.required.set(true)
-        csv.required.set(false)
+        // Force a deterministic location:
+        xml.outputLocation.set(
+            layout.buildDirectory.file("reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
+        )
     }
 
-    val javaDebug = fileTree("$buildDir/intermediates/javac/debug/classes") {
-        exclude(excludedClasses)
-    }
-    val kotlinDebug = fileTree("$buildDir/tmp/kotlin-classes/debug") {
-        exclude(excludedClasses)
-    }
+    val excluded = listOf(
+        "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
+        "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*",
+        "**/*_Factory*.*", "**/*_Provide*Factory*.*",
+        "**/*Companion*.*", "**/*Module*.*",
+        "**/*Binding.*", "**/*BindingImpl.*", "**/*ComposableSingletons*.*"
+    )
+
+    val javaDebug = fileTree("${buildDir}/intermediates/javac/debug/classes") { exclude(excluded) }
+    val kotlinDebug = fileTree("${buildDir}/tmp/kotlin-classes/debug") { exclude(excluded) }
 
     classDirectories.setFrom(files(javaDebug, kotlinDebug))
     sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
@@ -147,8 +145,7 @@ tasks.register<JacocoReport>("jacocoTestReport") {
             include(
                 "jacoco/testDebugUnitTest.exec",
                 "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec",
-                "**/jacoco/*.exec",
-                "**/*.ec"
+                "**/jacoco/*.exec", "**/*.ec"
             )
         }
     )
