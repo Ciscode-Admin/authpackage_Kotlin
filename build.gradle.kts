@@ -159,6 +159,9 @@ tasks.named("sonarqube") {
 }
 
 /* ---------- SonarQube / SonarCloud ---------- */
+fun existing(vararg paths: String) =
+    paths.filter { file(it).exists() }.joinToString(",")
+
 sonarqube {
     properties {
         property("sonar.host.url", "https://sonarcloud.io")
@@ -167,19 +170,17 @@ sonarqube {
         property("sonar.projectName", "pkg-android-auth")
         property("sonar.projectVersion", version.toString())
 
-        // If you have Kotlin sources, include them too
-        property("sonar.sources", "src/main/java,src/main/kotlin")
-        property("sonar.tests", "src/test/java")
+        property("sonar.sources", existing("src/main/java", "src/main/kotlin"))
+        property("sonar.tests",   existing("src/test/java", "src/test/kotlin"))
 
-        // Do not exclude test files globally (avoid hiding coverage)
-        property("sonar.exclusions", "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*")
+        property("sonar.exclusions",
+            "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*")
 
         property("sonar.java.binaries",
             "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug")
 
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
         property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
-
         property("sonar.coverage.jacoco.xmlReportPaths",
             "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
     }
