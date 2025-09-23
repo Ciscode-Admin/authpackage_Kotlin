@@ -161,24 +161,52 @@ fun existing(vararg paths: String) =
 
 sonarqube {
     properties {
-        property("sonar.host.url", "https://sonarcloud.io")
+        // --- required identifiers (unchanged) ---
         property("sonar.organization", "ciscode")
         property("sonar.projectKey", "CISCODEAPPS_pkg-android-auth")
         property("sonar.projectName", "pkg-android-auth")
         property("sonar.projectVersion", version.toString())
+        property("sonar.host.url", "https://sonarcloud.io")
 
-        property("sonar.sources", existing("src/main/java", "src/main/kotlin"))
-        property("sonar.tests",   existing("src/test/java", "src/test/kotlin"))
+        // --- sources / tests (keep java here since you have src/test/java) ---
+        property("sonar.sources", "src/main/java")
+        property("sonar.tests",   "src/test/java")
 
-        property("sonar.exclusions",
-            "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*")
+        // --- binaries (MAIN) -> include all AGP 8.x debug outputs + jars ---
+        property(
+            "sonar.java.binaries",
+            listOf(
+                "$buildDir/intermediates/javac/debug/classes",
+                "$buildDir/tmp/kotlin-classes/debug",
+                // AGP packs classes into jars; include both common jars
+                "$buildDir/intermediates/compile_library_classes_jar/debug/classes.jar",
+                "$buildDir/intermediates/aar_main_jar/debug/classes.jar"
+            ).joinToString(",")
+        )
 
-        property("sonar.java.binaries",
-            "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug")
+        // --- binaries (TEST) -> helps test detection & rule accuracy ---
+        property(
+            "sonar.java.test.binaries",
+            listOf(
+                "$buildDir/intermediates/javac/debugUnitTest/classes",
+                "$buildDir/tmp/kotlin-classes/debugUnitTest"
+            ).joinToString(",")
+        )
 
+        // --- reports ---
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
+        property(
+            "sonar.coverage.jacoco.xmlReportPaths",
+            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
+        )
+
+        // optional; fine to keep
         property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
-        property("sonar.coverage.jacoco.xmlReportPaths",
-            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
+
+        // keep your exclusions if you want, they don't affect coverage import
+        property(
+            "sonar.exclusions",
+            "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*"
+        )
     }
 }
