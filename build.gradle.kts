@@ -43,15 +43,23 @@ android {
         }
     }
     testOptions {
-        unitTests.isIncludeAndroidResources = true
-    }
+    unitTests.isIncludeAndroidResources = true
 
-    // Use the same JaCoCo version everywhere
-    testOptions.unitTests.all {
-        it.extensions.configure<JacocoTaskExtension> {
-            isIncludeNoLocationClasses = true
-        }
+    unitTests.all {
+        it.jvmArgs(
+            "--add-opens=java.base/java.lang=ALL-UNNAMED",
+            "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+            "--add-opens=java.base/java.io=ALL-UNNAMED",
+            "--add-opens=java.base/java.util=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+            "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+            "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+            "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
+            "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+        )
     }
+}
 }
 
 group = "com.ciscod.android"
