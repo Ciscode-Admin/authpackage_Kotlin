@@ -60,6 +60,20 @@ steps:
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
 
+  # Assert the JaCoCo XML exists (fail here if missing)
+  - bash: |
+      set -e
+      FILE="build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
+      if [ ! -s "$FILE" ]; then
+        echo "COVERAGE XML NOT FOUND or EMPTY: $FILE"
+        echo "Nearby files:"
+        ls -la build/reports/jacoco || true
+        ls -la build/reports/jacoco/jacocoTestReport || true
+        exit 1
+      fi
+      echo "Found coverage XML ($(wc -c < "$FILE") bytes): $FILE"
+    displayName: 'Assert JaCoCo XML exists'
+
   # (Optional) Upload the coverage XML as a pipeline artifact for debugging
   - task: PublishBuildArtifacts@1
     displayName: 'Attach jacoco XML (debugging)'
@@ -69,7 +83,7 @@ steps:
       ArtifactName: 'coverage-xml'
       publishLocation: 'Container'
 
-  # Run the Sonar analysis (the Gradle task now dependsOn jacocoTestReport)
+  # Run the Sonar analysis (Gradle 'sonarqube' dependsOn jacocoTestReport in build.gradle)
   - bash: ./gradlew sonarqube --stacktrace --no-daemon
     displayName: 'Run SonarCloud analysis (Gradle)'
 
