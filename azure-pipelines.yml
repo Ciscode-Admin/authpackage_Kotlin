@@ -41,39 +41,30 @@ steps:
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
     displayName: Ensure Android SDK 35 is installed
 
+  # ---- SONARCLOUD: PREPARE ----
+  - task: SonarCloudPrepare@1
+    displayName: Prepare SonarCloud analysis
+    inputs:
+      SonarCloud: 'Sonarqube Cloud'   # service connection name
+      organization: 'ciscode'
+      scannerMode: 'Other'            # we run Gradle's 'sonarqube' task
+      projectKey: 'CISCODEAPPS_pkg-android-auth'
+      projectName: 'pkg-android-auth'
+
   # ---- RUN UNIT TESTS + COVERAGE ----
   # Allow the job to continue so the reports can be published.
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
-  - task: PublishTestResults@2
-    displayName: Publish JUnit results
-    condition: always()
-    inputs:
-      testResultsFormat: 'JUnit'
-      testResultsFiles: '**/build/test-results/testDebugUnitTest/*.xml'
-      searchFolder: '$(System.DefaultWorkingDirectory)'
-      failTaskOnFailedTests: true
+  # ---- SONARCLOUD: RUN ANALYSIS VIA GRADLE ----
+  - bash: ./gradlew sonarqube --stacktrace --no-daemon
+    displayName: Run SonarCloud analysis (Gradle)
 
-  # ---- SONARQUBE ANALYSIS (self-hosted) ----
-  # Define pipeline variables in Azure DevOps:
-  #   SONAR_HOST_URL = https://your.sonarqube.server
-  #   SONAR_TOKEN    = <user token>  (secret)
-  - bash: |
-      set -euo pipefail
-      if [ -z "${SONAR_HOST_URL:-}" ] || [ -z "${SONAR_TOKEN:-}" ]; then
-        echo "ERROR: SONAR_HOST_URL and/or SONAR_TOKEN not set as pipeline variables."
-        exit 1
-      fi
-      echo "Running SonarQube analysis against: $SONAR_HOST_URL"
-      ./gradlew sonarqube \
-        -Dsonar.host.url="$SONAR_HOST_URL" \
-        -Dsonar.login="$SONAR_TOKEN" \
-        --stacktrace --no-daemon
-    displayName: Run SonarQube analysis
-    env:
-      SONAR_HOST_URL: $(SONAR_HOST_URL)
-      SONAR_TOKEN: $(SONAR_TOKEN)
+  # ---- SONARCLOUD: PUBLISH QUALITY GATE ----
+  - task: SonarCloudPublish@1
+    displayName: Publish SonarCloud Quality Gate
+    inputs:
+      pollingTimeoutSec: '300'
 
   # Build the release AAR (only runs if tests+analysis step succeeded)
   - bash: ./gradlew :assembleRelease
