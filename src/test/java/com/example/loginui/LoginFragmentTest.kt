@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.TextView
 import androidx.appcompat.widget.AppCompatButton
 import org.junit.Test
 import androidx.fragment.app.testing.launchFragmentInContainer
@@ -18,6 +19,7 @@ import com.example.loginui.net.LoginUi
 import com.example.loginui.net.SocialConfig
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.mockito.kotlin.any
@@ -25,6 +27,7 @@ import retrofit2.Call
 import org.mockito.kotlin.*
 import retrofit2.Callback
 import retrofit2.Response
+import okio.buffer
 
 @RunWith(AndroidJUnit4::class)
 class LoginFragmentTest {
@@ -372,6 +375,243 @@ class LoginFragmentTest {
         scenario.onFragment { _ ->
             assertTrue("Button should be re-enabled after error", btnLogin.isEnabled)
         }
+
+        setLoginUiService(null)
+    }
+
+    @Test
+    fun clickingForgot_emitsForgotAction() {
+        val scenario = launchFragmentInContainer<LoginFragment>(
+            fragmentArgs = Bundle(),
+            themeResId = R.style.LoginUiTestTheme
+        )
+
+        val box = arrayOfNulls<Bundle>(1)
+
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(
+                LoginFragment.RESULT_KEY, act
+            ) { _, b -> box[0] = b }
+
+            f.requireView()
+                .findViewById<TextView>(R.id.linkForgot)
+                .performClick()
+        }
+
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        val result = requireNotNull(box[0]) { "Expected a FragmentResult from linkForgot" }
+        assertEquals(LoginFragment.ACTION_FORGOT, result.getString(LoginFragment.ACTION))
+    }
+
+    @Test
+    fun clickingGoogle_emitsGoogleAction() {
+        val scenario = launchFragmentInContainer<LoginFragment>(
+            fragmentArgs = Bundle(),
+            themeResId = com.example.loginui.R.style.LoginUiTestTheme
+        )
+
+        val box = arrayOfNulls<Bundle>(1)
+
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(
+                LoginFragment.RESULT_KEY, act
+            ) { _, b -> box[0] = b }
+
+            f.requireView()
+                .findViewById<AppCompatButton>(R.id.btnGoogle)
+                .performClick()
+        }
+
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        val result = requireNotNull(box[0]) { "Expected a FragmentResult from btnGoogle" }
+        assertEquals(LoginFragment.ACTION_GOOGLE, result.getString(LoginFragment.ACTION))
+    }
+
+    @Test
+    fun clickingFacebook_emitsFacebookAction() {
+        val scenario = launchFragmentInContainer<LoginFragment>(
+            fragmentArgs = Bundle(),
+            themeResId = com.example.loginui.R.style.LoginUiTestTheme
+        )
+
+        val box = arrayOfNulls<Bundle>(1)
+
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(
+                LoginFragment.RESULT_KEY, act
+            ) { _, b -> box[0] = b }
+
+            f.requireView()
+                .findViewById<AppCompatButton>(R.id.btnFacebook)
+                .performClick()
+        }
+
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        val result = requireNotNull(box[0]) { "Expected a FragmentResult from btnFacebook" }
+        assertEquals(LoginFragment.ACTION_FACEBOOK, result.getString(LoginFragment.ACTION))
+    }
+
+    @Test
+    fun clickingMicrosoft_emitsMicrosoftAction() {
+        // Ensure the button is visible
+        setSocialConfig(SocialConfig(showGoogle = true, showFacebook = true, showMicrosoft = true))
+
+        val scenario = launchFragmentInContainer<LoginFragment>(
+            fragmentArgs = Bundle(),
+            themeResId = com.example.loginui.R.style.LoginUiTestTheme
+        )
+
+        val box = arrayOfNulls<Bundle>(1)
+
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(
+                LoginFragment.RESULT_KEY, act
+            ) { _, b -> box[0] = b }
+
+            f.requireView()
+                .findViewById<AppCompatButton>(R.id.btnMicrosoft)
+                .performClick()
+        }
+
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        val result = requireNotNull(box[0]) { "Expected a FragmentResult from btnMicrosoft" }
+        assertEquals(LoginFragment.ACTION_MICROSOFT, result.getString(LoginFragment.ACTION))
+    }
+
+    @Test
+    fun onHttpError_withoutBody_emitsGenericHttpMessage() {
+        val mockService = mock<AuthService>()
+        val mockCall = mock<Call<LoginResponse>>()
+        whenever(mockService.login(any())).thenReturn(mockCall)
+
+        // Simulate an HTTP 500 with an empty body → should produce "HTTP 500"
+        doAnswer { inv ->
+            val cb = inv.arguments[0] as Callback<LoginResponse>
+            val empty = "".toResponseBody("text/plain".toMediaTypeOrNull())
+            cb.onResponse(mockCall, Response.error(500, empty))
+            null
+        }.whenever(mockCall).enqueue(any())
+
+        setLoginUiService(mockService)
+
+        val scenario = launchFragmentInContainer<LoginFragment>(
+            fragmentArgs = Bundle(),
+            themeResId = R.style.LoginUiTestTheme
+        )
+
+        val box = arrayOfNulls<Bundle>(1)
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(
+                LoginFragment.RESULT_KEY, act
+            ) { _, b -> box[0] = b }
+
+            val v = f.requireView()
+            v.findViewById<EditText>(R.id.inputEmail).setText("user@example.com")
+            v.findViewById<EditText>(R.id.inputPassword).setText("secret")
+            v.findViewById<Button>(R.id.btnLogin).performClick()
+        }
+
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        val result = requireNotNull(box[0])
+        assertEquals(LoginFragment.ACTION_LOGIN_ERROR, result.getString(LoginFragment.ACTION))
+        assertEquals(500, result.getInt(LoginFragment.STATUS_CODE))
+        assertTrue(result.getString(LoginFragment.ERROR)!!.contains("HTTP 500"))
+
+        setLoginUiService(null)
+    }
+
+    @Test
+    fun clickingSignup_emitsSignupAction() {
+        val scenario = launchFragmentInContainer<LoginFragment>(
+            fragmentArgs = Bundle(),
+            themeResId = R.style.LoginUiTestTheme
+        )
+
+        val box = arrayOfNulls<Bundle>(1)
+
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(
+                LoginFragment.RESULT_KEY, act
+            ) { _, b -> box[0] = b }
+
+            f.requireView()
+                .findViewById<TextView>(R.id.linkSignup)
+                .performClick()
+        }
+
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        val result = requireNotNull(box[0]) { "Expected a FragmentResult from linkSignup" }
+        assertEquals(LoginFragment.ACTION_SIGNUP, result.getString(LoginFragment.ACTION))
+    }
+
+    @Test
+    fun onHttpError_errorBodyThrowsIOException_emitsGenericHttpMessage() {
+        val mockService = mock<AuthService>()
+        val mockCall = mock<Call<LoginResponse>>()
+        whenever(mockService.login(any())).thenReturn(mockCall)
+
+        // A ResponseBody whose source() throws on read()
+        val throwingBody = object : okhttp3.ResponseBody() {
+            override fun contentType() = "text/plain".toMediaTypeOrNull()
+            override fun contentLength() = -1L
+            override fun source(): okio.BufferedSource {
+                val src = object : okio.Source {
+                    override fun read(sink: okio.Buffer, byteCount: Long): Long {
+                        throw java.io.IOException("boom")
+                    }
+                    override fun timeout(): okio.Timeout = okio.Timeout.NONE
+                    override fun close() {}
+                }
+                return src.buffer()
+            }
+        }
+
+        // Enqueue: HTTP 500 with a body that throws when read
+        doAnswer { inv ->
+            val cb = inv.arguments[0] as Callback<LoginResponse>
+            cb.onResponse(mockCall, Response.error(500, throwingBody))
+            null
+        }.whenever(mockCall).enqueue(any())
+
+        setLoginUiService(mockService)
+
+        val scenario = launchFragmentInContainer<LoginFragment>(
+            fragmentArgs = Bundle(),
+            themeResId = R.style.LoginUiTestTheme
+        )
+
+        val box = arrayOfNulls<Bundle>(1)
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(
+                LoginFragment.RESULT_KEY, act
+            ) { _, b -> box[0] = b }
+
+            val v = f.requireView()
+            v.findViewById<EditText>(R.id.inputEmail).setText("user@example.com")
+            v.findViewById<EditText>(R.id.inputPassword).setText("secret")
+            v.findViewById<Button>(R.id.btnLogin).performClick()
+        }
+
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        val result = requireNotNull(box[0])
+        assertEquals(LoginFragment.ACTION_LOGIN_ERROR, result.getString(LoginFragment.ACTION))
+        assertEquals(500, result.getInt(LoginFragment.STATUS_CODE))
+        // Because reading the body threw, code should fall back to generic HTTP message
+        assertTrue(result.getString(LoginFragment.ERROR)!!.contains("HTTP 500"))
 
         setLoginUiService(null)
     }
