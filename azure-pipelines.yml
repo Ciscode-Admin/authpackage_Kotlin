@@ -119,8 +119,6 @@ steps:
   - bash: |
       set -e
       ./gradlew sonarqube \
-        -Dsonar.sources="$(SONAR_SOURCES)" \
-        -Dsonar.tests="$(SONAR_TESTS)" \
         -Dsonar.java.binaries="$(SONAR_BINARIES)" \
         -Dsonar.coverage.jacoco.xmlReportPaths="$(COVERAGE_XML)" \
         --stacktrace --no-daemon
