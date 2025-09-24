@@ -60,16 +60,15 @@ steps:
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
 
-  # Locate coverage XML and build an exact binaries list for Sonar
+  # Discover the JaCoCo XML and the actual class binaries that Sonar must read
   - bash: |
       set -euo pipefail
 
-      # 1) Resolve JaCoCo XML
+      # 1) Resolve JaCoCo XML (from jacocoTestReport task)
       XML_DEFAULT="build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
       if [ -f "$XML_DEFAULT" ]; then
         COV_XML="$XML_DEFAULT"
       else
-        # Try to find any jacoco XML as a fallback
         COV_XML="$(find "$PWD" -type f -name 'jacocoTestReport.xml' | head -n 1 || true)"
       fi
       echo "Coverage XML: ${COV_XML:-<none>}"
@@ -79,7 +78,7 @@ steps:
       fi
       echo "##vso[task.setvariable variable=COVERAGE_XML]$COV_XML"
 
-      # 2) Build sonar.sources dynamically (include kotlin if present)
+      # 2) Sources (only include dirs that exist to avoid scanner errors)
       SRC="src/main/java"
       if [ -d "src/main/kotlin" ]; then
         SRC="$SRC,src/main/kotlin"
@@ -87,16 +86,14 @@ steps:
       echo "Sources: $SRC"
       echo "##vso[task.setvariable variable=SONAR_SOURCES]$SRC"
 
-      # 3) Discover all relevant debug class outputs for AGP 8.x
-      #    Directories:
+      # 3) Binaries for AGP 8.x
       BIN_DIRS=()
       [ -d "build/intermediates/javac/debug/classes" ] && BIN_DIRS+=("build/intermediates/javac/debug/classes")
       [ -d "build/tmp/kotlin-classes/debug" ] && BIN_DIRS+=("build/tmp/kotlin-classes/debug")
 
-      #    classes.jar artifacts:
+      # Also include compiled classes inside classes.jar (gradle intermediates)
       mapfile -t JARS < <(find build/intermediates -type f -name classes.jar 2>/dev/null || true)
 
-      # Compose comma-separated list for Sonar
       BIN_LIST=""
       for p in "${BIN_DIRS[@]}"; do
         if [ -z "$BIN_LIST" ]; then BIN_LIST="$p"; else BIN_LIST="$BIN_LIST,$p"; fi
@@ -106,7 +103,7 @@ steps:
       done
 
       echo "Sonar binaries:"
-      echo "$BIN_LIST" | tr ',' '\n'
+      echo "${BIN_LIST:-<none>}" | tr ',' '\n'
 
       if [ -z "$BIN_LIST" ]; then
         echo "WARNING: No class files found. Coverage cannot be mapped."
@@ -115,7 +112,7 @@ steps:
       echo "##vso[task.setvariable variable=SONAR_BINARIES]$BIN_LIST"
     displayName: Discover coverage XML and binaries
 
-  # (Optional) Attach the XML so you can open it from the run
+  # Attach the XML so you can open it from the run (helps verify contents)
   - task: PublishBuildArtifacts@1
     displayName: Attach jacoco XML (debugging)
     condition: always()
@@ -129,7 +126,7 @@ steps:
       set -e
       ./gradlew sonarqube \
         -Dsonar.sources="$(SONAR_SOURCES)" \
-        -Dsonar.tests="src/test/java" \
+        -Dsonar.tests="src/test/java,src/test/kotlin" \
         -Dsonar.java.binaries="$(SONAR_BINARIES)" \
         -Dsonar.coverage.jacoco.xmlReportPaths="$(COVERAGE_XML)" \
         --stacktrace --no-daemon
@@ -148,7 +145,9 @@ steps:
       GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
       VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
       ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
-      [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ] && { echo "POM coords not found"; exit 1; }
+      if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
+        echo "POM coords not found in build.gradle.kts"; exit 1
+      fi
       GROUP_PATH=${GROUP//./\/}
       URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.aar"
       STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
