@@ -36,7 +36,6 @@ steps:
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
     displayName: Ensure Android SDK 35 is installed
 
-  # Prepare SonarCloud (service connection name must match your created connection)
   - task: SonarCloudPrepare@1
     displayName: Prepare SonarCloud analysis
     inputs:
@@ -46,11 +45,9 @@ steps:
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # Run JVM unit tests + produce JaCoCo XML
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
-  # Publish JUnit to see test counts/failures in the run
   - task: PublishTestResults@2
     displayName: Publish JUnit results
     condition: always()
@@ -60,11 +57,11 @@ steps:
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
 
-  # Discover the JaCoCo XML and the actual class binaries that Sonar must read
+  # Discover coverage XML, sources, tests, and binaries (only include paths that exist)
   - bash: |
       set -euo pipefail
 
-      # 1) Resolve JaCoCo XML (from jacocoTestReport task)
+      # 1) Coverage XML
       XML_DEFAULT="build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
       if [ -f "$XML_DEFAULT" ]; then
         COV_XML="$XML_DEFAULT"
@@ -78,41 +75,39 @@ steps:
       fi
       echo "##vso[task.setvariable variable=COVERAGE_XML]$COV_XML"
 
-      # 2) Sources (only include dirs that exist to avoid scanner errors)
-      SRC="src/main/java"
-      if [ -d "src/main/kotlin" ]; then
-        SRC="$SRC,src/main/kotlin"
-      fi
-      echo "Sources: $SRC"
-      echo "##vso[task.setvariable variable=SONAR_SOURCES]$SRC"
+      # 2) Sources
+      SRC_DIRS=()
+      [ -d "src/main/java" ] && SRC_DIRS+=("src/main/java")
+      [ -d "src/main/kotlin" ] && SRC_DIRS+=("src/main/kotlin")
+      SONAR_SOURCES="$(IFS=, ; echo "${SRC_DIRS[*]}")"
+      echo "Sources: ${SONAR_SOURCES:-<none>}"
+      echo "##vso[task.setvariable variable=SONAR_SOURCES]$SONAR_SOURCES"
 
-      # 3) Binaries for AGP 8.x
+      # 3) Tests (dynamic — avoid missing-folder errors)
+      TEST_DIRS=()
+      [ -d "src/test/java" ] && TEST_DIRS+=("src/test/java")
+      [ -d "src/test/kotlin" ] && TEST_DIRS+=("src/test/kotlin")
+      SONAR_TESTS="$(IFS=, ; echo "${TEST_DIRS[*]}")"
+      echo "Tests: ${SONAR_TESTS:-<none>}"
+      echo "##vso[task.setvariable variable=SONAR_TESTS]$SONAR_TESTS"
+
+      # 4) Binaries (AGP 8.x debug)
       BIN_DIRS=()
       [ -d "build/intermediates/javac/debug/classes" ] && BIN_DIRS+=("build/intermediates/javac/debug/classes")
       [ -d "build/tmp/kotlin-classes/debug" ] && BIN_DIRS+=("build/tmp/kotlin-classes/debug")
-
-      # Also include compiled classes inside classes.jar (gradle intermediates)
+      # classes.jar produced for modules/intermediates
       mapfile -t JARS < <(find build/intermediates -type f -name classes.jar 2>/dev/null || true)
 
-      BIN_LIST=""
-      for p in "${BIN_DIRS[@]}"; do
-        if [ -z "$BIN_LIST" ]; then BIN_LIST="$p"; else BIN_LIST="$BIN_LIST,$p"; fi
-      done
+      BIN_LIST="$(IFS=, ; echo "${BIN_DIRS[*]}")"
       for j in "${JARS[@]}"; do
         if [ -z "$BIN_LIST" ]; then BIN_LIST="$j"; else BIN_LIST="$BIN_LIST,$j"; fi
       done
 
       echo "Sonar binaries:"
       echo "${BIN_LIST:-<none>}" | tr ',' '\n'
-
-      if [ -z "$BIN_LIST" ]; then
-        echo "WARNING: No class files found. Coverage cannot be mapped."
-      fi
-
       echo "##vso[task.setvariable variable=SONAR_BINARIES]$BIN_LIST"
-    displayName: Discover coverage XML and binaries
+    displayName: Discover coverage XML, sources, tests, binaries
 
-  # Attach the XML so you can open it from the run (helps verify contents)
   - task: PublishBuildArtifacts@1
     displayName: Attach jacoco XML (debugging)
     condition: always()
@@ -121,12 +116,11 @@ steps:
       ArtifactName: 'coverage-xml'
       publishLocation: 'Container'
 
-  # Run Sonar with explicit, discovered inputs (this is the key)
   - bash: |
       set -e
       ./gradlew sonarqube \
         -Dsonar.sources="$(SONAR_SOURCES)" \
-        -Dsonar.tests="src/test/java,src/test/kotlin" \
+        -Dsonar.tests="$(SONAR_TESTS)" \
         -Dsonar.java.binaries="$(SONAR_BINARIES)" \
         -Dsonar.coverage.jacoco.xmlReportPaths="$(COVERAGE_XML)" \
         --stacktrace --no-daemon
