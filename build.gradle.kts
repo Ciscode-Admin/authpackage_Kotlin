@@ -8,6 +8,18 @@ plugins {
     jacoco
 }
 
+import org.gradle.testing.jacoco.tasks.JacocoReport
+import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
+import org.gradle.api.tasks.testing.Test
+
+// Make JaCoCo work with Robolectric/Android unit tests
+tasks.withType<Test>().configureEach {
+    // Required for Robolectric/Android bytecode generated in-memory
+    jacoco.includeNoLocationClasses = true
+    // Avoid noise from JDK internals when includeNoLocationClasses is true
+    jacoco.excludes = listOf("jdk.internal.*")
+}
+
 android {
     namespace = "com.example.loginui"
     compileSdk = 35
