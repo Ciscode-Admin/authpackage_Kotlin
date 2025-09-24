@@ -108,6 +108,7 @@ class LoginFragment : Fragment() {
                                 val msg = runCatching { response.errorBody()?.string() }
                                     .getOrNull()
                                     ?.take(2000)
+                                    ?.takeUnless { it.isBlank() }
                                     ?: "HTTP ${response.code()}"
                                 parentFragmentManager.setFragmentResult(
                                     RESULT_KEY,

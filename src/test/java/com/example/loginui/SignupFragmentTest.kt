@@ -19,6 +19,7 @@ import retrofit2.Response
 import org.junit.Assert.*
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.runner.RunWith
+import okio.buffer
 
 @RunWith(AndroidJUnit4::class)
 class SignupFragmentTest {
@@ -294,5 +295,147 @@ class SignupFragmentTest {
         idleMain()
 
         assertEquals(SignupFragment.ACTION_GO_LOGIN, box[0]!!.getString(SignupFragment.ACTION))
+    }
+
+    @Test
+    fun onSuccessfulSignup_withNullRoles_emitsSuccessWithoutRoles() {
+        val mockService = mock<AuthService>()
+        val mockCall = mock<Call<SignupResponse>>()
+        whenever(mockService.register(any())).thenReturn(mockCall)
+        doAnswer { inv ->
+            val cb = inv.arguments[0] as Callback<SignupResponse>
+            cb.onResponse(
+                mockCall,
+                Response.success(SignupResponse(id = "idN", email = "n@e.com", name = "NoRoles", roles = null))
+            )
+            null
+        }.whenever(mockCall).enqueue(any())
+        setLoginUiService(mockService)
+
+        val scenario = launch()
+        val box = arrayOfNulls<Bundle>(1)
+
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(SignupFragment.RESULT_KEY, act) { _, b -> box[0] = b }
+
+            // valid inputs then click
+            enter(f, name = "NoRoles", email = "n@e.com", pass = "p", confirm = "p")
+            f.requireView().findViewById<Button>(R.id.btnSignup).performClick()
+        }
+        idleMain()
+
+        val result = requireNotNull(box[0])
+        assertEquals(SignupFragment.ACTION_SIGNUP_SUCCESS, result.getString(SignupFragment.ACTION))
+        assertEquals("idN", result.getString(SignupFragment.ID))
+        assertEquals("n@e.com", result.getString(SignupFragment.EMAIL))
+        assertEquals("NoRoles", result.getString(SignupFragment.NAME))
+        // <-- THIS is the branch: roles should be absent/null
+        assertNull(result.getStringArrayList(SignupFragment.ROLES))
+
+        setLoginUiService(null)
+    }
+
+    @Test
+    fun clickingSignup_withBlankName_sendsNullName() {
+        val mockService = mock<AuthService>()
+        val mockCall = mock<Call<SignupResponse>>()
+        whenever(mockService.register(any())).thenReturn(mockCall)
+        doAnswer { /* no network */ }.whenever(mockCall).enqueue(any())
+        setLoginUiService(mockService)
+
+        val scenario = launch()
+
+        scenario.onFragment { f ->
+            // Name intentionally blank -> should be sent as null
+            enter(f, name = "", email = "u@e.com", pass = "p", confirm = "p")
+            f.requireView().findViewById<Button>(R.id.btnSignup).performClick()
+        }
+
+        val req = argumentCaptor<SignupRequest>()
+        verify(mockService).register(req.capture())
+        assertEquals("u@e.com", req.firstValue.email)
+        assertEquals("p", req.firstValue.password)
+        assertNull("Blank name must be sent as null", req.firstValue.name)
+
+        setLoginUiService(null)
+    }
+
+    @Test
+    fun onSuccessfulSignup_withNullBody_emitsErrorHttp200() {
+        val svc = mock<AuthService>()
+        val call = mock<Call<SignupResponse>>()
+        whenever(svc.register(any())).thenReturn(call)
+        doAnswer { inv ->
+            val cb = inv.arguments[0] as Callback<SignupResponse>
+            // Success but null body
+            cb.onResponse(call, Response.success<SignupResponse>(null))
+            null
+        }.whenever(call).enqueue(any())
+        setLoginUiService(svc)
+
+        val scenario = launch()
+        val box = arrayOfNulls<Bundle>(1)
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(SignupFragment.RESULT_KEY, act) { _, b -> box[0] = b }
+            enter(f, name = "A", email = "a@b.com", pass = "p", confirm = "p")
+            f.requireView().findViewById<Button>(R.id.btnSignup).performClick()
+        }
+        idleMain()
+
+        val result = requireNotNull(box[0])
+        assertEquals(SignupFragment.ACTION_SIGNUP_ERROR, result.getString(SignupFragment.ACTION))
+        assertEquals(200, result.getInt(SignupFragment.STATUS_CODE))
+        assertTrue(result.getString(SignupFragment.ERROR)!!.contains("HTTP 200"))
+
+        setLoginUiService(null)
+    }
+
+    @Test
+    fun onHttpError_whenReadingBodyThrows_emitsHttpCode() {
+        val svc = mock<AuthService>()
+        val call = mock<Call<SignupResponse>>()
+        whenever(svc.register(any())).thenReturn(call)
+
+        // ResponseBody that throws when its source is read (so .string() will throw)
+        val throwingBody = object : ResponseBody() {
+            override fun contentType() = "text/plain".toMediaTypeOrNull()
+            override fun contentLength() = -1L
+            override fun source(): okio.BufferedSource {
+                val src = object : okio.Source {
+                    override fun read(sink: okio.Buffer, byteCount: Long): Long {
+                        throw java.io.IOException("boom")
+                    }
+                    override fun timeout(): okio.Timeout = okio.Timeout.NONE
+                    override fun close() {}
+                }
+                return src.buffer()
+            }
+        }
+
+        doAnswer { inv ->
+            val cb = inv.arguments[0] as Callback<SignupResponse>
+            cb.onResponse(call, Response.error(418, throwingBody))
+            null
+        }.whenever(call).enqueue(any())
+        setLoginUiService(svc)
+
+        val scenario = launch()
+        val box = arrayOfNulls<Bundle>(1)
+        scenario.onFragment { f ->
+            val act = f.requireActivity()
+            act.supportFragmentManager.setFragmentResultListener(SignupFragment.RESULT_KEY, act) { _, b -> box[0] = b }
+            enter(f, name = "A", email = "a@b.com", pass = "p", confirm = "p")
+            f.requireView().findViewById<Button>(R.id.btnSignup).performClick()
+        }
+        idleMain()
+
+        val result = requireNotNull(box[0])
+        assertEquals(SignupFragment.ACTION_SIGNUP_ERROR, result.getString(SignupFragment.ACTION))
+        assertEquals(418, result.getInt(SignupFragment.STATUS_CODE))
+        assertTrue(result.getString(SignupFragment.ERROR)!!.contains("HTTP 418"))
+
+        setLoginUiService(null)
     }
 }
