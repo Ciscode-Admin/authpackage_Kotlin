@@ -1,6 +1,7 @@
 package com.example.loginui
 
 import android.os.Bundle
+import androidx.fragment.app.Fragment
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.loginui.ms.MicrosoftLoginManager
 import com.microsoft.identity.client.AcquireTokenParameters
@@ -141,6 +142,35 @@ class MicrosoftLoginManagerTest {
 
         assertNull(box[0])
         assertTrue(err[0] is CancellationException)
+
+        setPca(null)
+    }
+
+    @Test
+    fun ensurePca_private_earlyReturn_viaReflection() {
+        // Seed PCA so ensurePca returns immediately
+        val seeded = mock<IPublicClientApplication>()
+        setPca(seeded)
+
+        val scenario = launchLoginFragment()
+        scenario.onFragment { f ->
+            val m = MicrosoftLoginManager::class.java.getDeclaredMethod(
+                "ensurePca",
+                Fragment::class.java,
+                Int::class.javaPrimitiveType
+            )
+            m.isAccessible = true
+            val instance = MicrosoftLoginManager::class.java
+                .getDeclaredField("INSTANCE")
+                .apply { isAccessible = true }
+                .get(null)
+            m.invoke(instance, f, 0)
+        }
+
+        // It should still be the same instance (early return path covered)
+        val fld = MicrosoftLoginManager::class.java.getDeclaredField("pca")
+        fld.isAccessible = true
+        assertSame(seeded, fld.get(null))
 
         setPca(null)
     }
