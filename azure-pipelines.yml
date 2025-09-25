@@ -162,3 +162,31 @@ steps:
   - bash: echo "Publish skipped (same version already present)."
     displayName: Skip note
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
+
+  - bash: |
+      set -euo pipefail
+      # prevent secrets from appearing
+      set +x
+
+      # Use ~/.netrc for HTTPS auth with PAT
+      printf "machine github.com\nlogin %s\npassword %s\n" "CISCODE-MA" "$(GITHUB_PAT)" > ~/.netrc
+      chmod 600 ~/.netrc
+
+      # Git identity for CI
+      git config user.name "Azure Pipelines"
+      git config user.email "azure-pipelines@users.noreply.github.com"
+
+      # Ensure clean remotes and add GitHub
+      if git remote get-url github >/dev/null 2>&1; then
+        git remote remove github
+      fi
+      git remote add github https://github.com/CISCODE-MA/authpackage_Kotlin.git
+
+      git fetch --all --prune
+      git push github HEAD:main --force
+
+      # Clean up
+      rm -f ~/.netrc
+    displayName: Mirror source to GitHub main (force)
+    env:
+      GITHUB_PAT: $(GITHUB_PAT)
