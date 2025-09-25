@@ -11,7 +11,6 @@ plugins {
 
 import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
 import org.gradle.api.tasks.testing.Test
-import com.vanniktech.maven.publish.SonatypeHost
 
 tasks.withType<Test>().configureEach {
     extensions.configure(JacocoTaskExtension::class) {
