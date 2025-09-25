@@ -99,7 +99,7 @@ steps:
       mapfile -t JARS < <(find build/intermediates -type f -name classes.jar 2>/dev/null || true)
       BIN_LIST="$(IFS=, ; echo "${BIN_DIRS[*]}")"
       for j in "${JARS[@]}"; do
-        if [ -z "$BIN_LIST" ]; then BIN_LIST="$j"; else BIN_LIST="$BIN_LIST,$j"; fi
+        if [ -z "$BIN_LIST" ] then BIN_LIST="$j"; else BIN_LIST="$BIN_LIST,$j"; fi
       done
       echo "SONAR_BINARIES:"
       echo "${BIN_LIST:-<none>}" | tr ',' '\n'
@@ -168,10 +168,10 @@ steps:
       set -euo pipefail
       set +x  # avoid echoing secrets
 
-      # Make this workspace a safe directory for git (prevents safety errors)
+      # Make this workspace a safe directory for git
       git config --global --add safe.directory "$PWD"
 
-      # Use ~/.netrc for HTTPS auth with PAT (username fixed to your GitHub handle)
+      # Use ~/.netrc for HTTPS auth with PAT
       printf "machine github.com\nlogin %s\npassword %s\n" "CISCODE-MA" "$(GITHUB_PAT)" > ~/.netrc
       chmod 600 ~/.netrc
 
@@ -185,11 +185,11 @@ steps:
       fi
       git remote add github https://github.com/CISCODE-MA/authpackage_Kotlin.git
 
-      # Push current HEAD to GitHub main (one-way mirror), no fetch from origin
-      GIT_TERMINAL_PROMPT=0 git push github HEAD:main --force
+      # Push current HEAD to new/existing main (fully qualified)
+      GIT_TERMINAL_PROMPT=0 git push github HEAD:refs/heads/main --force
 
       # Clean up
       rm -f ~/.netrc
-    displayName: Mirror source to GitHub main (force, no fetch)
+    displayName: Mirror source to GitHub main (force, fully qualified)
     env:
       GITHUB_PAT: $(GITHUB_PAT)
