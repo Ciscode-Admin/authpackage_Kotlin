@@ -1,7 +1,8 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
-    id("maven-publish")
+    id("maven-publish") // keep for Azure Artifacts publication
+    id("com.vanniktech.maven.publish") version "0.34.0" // for Maven Central
 
     // Sonar + coverage
     id("org.sonarqube") version "5.1.0.4882"
@@ -10,6 +11,7 @@ plugins {
 
 import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
 import org.gradle.api.tasks.testing.Test
+import com.vanniktech.maven.publish.SonatypeHost
 
 tasks.withType<Test>().configureEach {
     extensions.configure(JacocoTaskExtension::class) {
@@ -46,6 +48,7 @@ android {
     kotlinOptions { jvmTarget = "11" }
 
     publishing {
+        // Keep sources jar for Azure + Central
         singleVariant("release") { withSourcesJar() }
     }
 
@@ -68,9 +71,44 @@ android {
     }
 }
 
-group = "com.ciscod.android"
+// ==== Coordinates for Maven Central ====
+group = "io.github.ciscode-ma"
 version = "0.1.0"
 
+// Vanniktech config for Central (creates sources/javadoc jars & signs)
+mavenPublishing {
+    publishToMavenCentral(automaticRelease = true)
+    signAllPublications()
+
+    coordinates("io.github.ciscode-ma", "authui", "0.1.0")
+    pom {
+        name.set("authui")
+        description.set("Android authentication UI library (AAR).")
+        inceptionYear.set("2025")
+        url.set("https://github.com/CISCODE-MA/authpackage_Kotlin")
+        licenses {
+            license {
+                name.set("The Apache License, Version 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                distribution.set("repo")
+            }
+        }
+        developers {
+            developer {
+                id.set("ciscode-ma")
+                name.set("CISCODE-MA")
+                url.set("https://github.com/CISCODE-MA")
+            }
+        }
+        scm {
+            url.set("https://github.com/CISCODE-MA/authpackage_Kotlin")
+            connection.set("scm:git:https://github.com/CISCODE-MA/authpackage_Kotlin.git")
+            developerConnection.set("scm:git:ssh://git@github.com/CISCODE-MA/authpackage_Kotlin.git")
+        }
+    }
+}
+
+// ==== Keep your Azure Artifacts publishing as-is ====
 publishing {
     repositories {
         maven {
@@ -84,7 +122,7 @@ publishing {
     }
     publications {
         create<MavenPublication>("authuiRelease") {
-            groupId = "com.ciscod.android"
+            groupId = "com.ciscod.android"      // stays for Azure feed path
             artifactId = "authui"
             version = "0.1.0"
             afterEvaluate { from(components["release"]) }
@@ -131,7 +169,6 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     reports {
         xml.required.set(true)
         html.required.set(true)
-        // Force a deterministic location:
         xml.outputLocation.set(
             layout.buildDirectory.file("reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
         )
@@ -161,45 +198,33 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     )
 }
 
-tasks.named("sonarqube") {
-    dependsOn("jacocoTestReport")
-}
+tasks.named("sonarqube") { dependsOn("jacocoTestReport") }
 
 /* ---------- SonarQube / SonarCloud ---------- */
 sonarqube {
     properties {
-        // SonarCloud identifiers
         property("sonar.organization", "ciscode")
         property("sonar.projectKey", "CISCODEAPPS_pkg-android-auth")
         property("sonar.projectName", "pkg-android-auth")
         property("sonar.projectVersion", version.toString())
         property("sonar.host.url", "https://sonarcloud.io")
 
-        // Build the list of existing source / test dirs (so we don't fail if one is missing)
         val sourceDirs = listOf("src/main/java", "src/main/kotlin").filter { file(it).exists() }
         val testDirs   = listOf("src/test/java", "src/test/kotlin").filter { file(it).exists() }
 
         property("sonar.sources", sourceDirs.joinToString(","))
         property("sonar.tests",   testDirs.joinToString(","))
 
-        // Exclusions
         property("sonar.exclusions",
             "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*"
         )
 
-        // Binaries (Debug)
-        property(
-            "sonar.java.binaries",
+        property("sonar.java.binaries",
             "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug"
         )
 
-        // JUnit reports
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
 
-        // (Optional) If you don’t run Android Lint, drop this to remove the warning
-        // property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
-
-        // JaCoCo XML report produced by the jacocoTestReport task
         property(
             "sonar.coverage.jacoco.xmlReportPaths",
             "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
