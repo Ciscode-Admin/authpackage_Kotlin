@@ -163,29 +163,33 @@ steps:
     displayName: Skip note
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
 
+  # -------- Mirror repo to GitHub (force push main, no fetch) --------
   - bash: |
-    set -euo pipefail
-    set +x  # avoid echoing secrets
+      set -euo pipefail
+      set +x  # avoid echoing secrets
 
-    # Use ~/.netrc for HTTPS auth with PAT (username fixed to your GitHub handle)
-    printf "machine github.com\nlogin %s\npassword %s\n" "CISCODE-MA" "$(GITHUB_PAT)" > ~/.netrc
-    chmod 600 ~/.netrc
+      # Make this workspace a safe directory for git (prevents safety errors)
+      git config --global --add safe.directory "$PWD"
 
-    # Git identity for CI
-    git config user.name "Azure Pipelines"
-    git config user.email "azure-pipelines@users.noreply.github.com"
+      # Use ~/.netrc for HTTPS auth with PAT (username fixed to your GitHub handle)
+      printf "machine github.com\nlogin %s\npassword %s\n" "CISCODE-MA" "$(GITHUB_PAT)" > ~/.netrc
+      chmod 600 ~/.netrc
 
-    # Add/replace the GitHub remote
-    if git remote get-url github >/dev/null 2>&1; then
-      git remote remove github
-    fi
-    git remote add github https://github.com/CISCODE-MA/authpackage_Kotlin.git
+      # Git identity for CI
+      git config user.name "Azure Pipelines"
+      git config user.email "azure-pipelines@users.noreply.github.com"
 
-    # Push current HEAD to GitHub main (one-way mirror), no fetch from origin
-    GIT_TERMINAL_PROMPT=0 git push github HEAD:main --force
+      # Add/replace the GitHub remote
+      if git remote get-url github >/dev/null 2>&1; then
+        git remote remove github
+      fi
+      git remote add github https://github.com/CISCODE-MA/authpackage_Kotlin.git
 
-    # Clean up
-    rm -f ~/.netrc
-  displayName: Mirror source to GitHub main (force, no fetch)
-  env:
-    GITHUB_PAT: $(GITHUB_PAT)
+      # Push current HEAD to GitHub main (one-way mirror), no fetch from origin
+      GIT_TERMINAL_PROMPT=0 git push github HEAD:main --force
+
+      # Clean up
+      rm -f ~/.netrc
+    displayName: Mirror source to GitHub main (force, no fetch)
+    env:
+      GITHUB_PAT: $(GITHUB_PAT)
