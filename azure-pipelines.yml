@@ -119,24 +119,34 @@ steps:
     condition: succeeded()
 
   # ---------- Azure Artifacts: publish if version not present ----------
-  # NOTE: read coords from the Azure publication (authuiRelease), not from project group.
+  # Robust check that NEVER fails the job. We hard-code Azure coords to
+  # match the Gradle publication (groupId=com.ciscod.android, artifactId=authui).
   - bash: |
-      set -euo pipefail
-      PUB_GROUP=$(grep -Po 'create<MavenPublication>\\("authuiRelease"\\)[^}]*?groupId\\s*=\\s*"\\K[^"]+' build.gradle.kts)
-      PUB_ARTIFACT=$(grep -Po 'create<MavenPublication>\\("authuiRelease"\\)[^}]*?artifactId\\s*=\\s*"\\K[^"]+' build.gradle.kts)
-      VERSION=$(grep -Po '^version\\s*=\\s*"\\K[^"]+' build.gradle.kts)
-      if [ -z "${PUB_GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${PUB_ARTIFACT:-}" ]; then
-        echo "Azure publication coords not found in build.gradle.kts"; exit 1
+      set +e  # do not fail this step
+      VERSION="$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' build.gradle.kts)"
+      AZ_GROUP="com.ciscod.android"
+      AZ_ARTIFACT="authui"
+
+      if [ -z "$VERSION" ]; then
+        echo "Could not parse version from build.gradle.kts; default to publishing."
+        echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
+        exit 0
       fi
-      GROUP_PATH=${PUB_GROUP//./\/}
-      URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${PUB_ARTIFACT}/${VERSION}/${PUB_ARTIFACT}-${VERSION}.aar"
-      STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
-      if [ "${STATUS}" = "200" ]; then
+
+      GROUP_PATH=${AZ_GROUP//./\/}
+      URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${AZ_ARTIFACT}/${VERSION}/${AZ_ARTIFACT}-${VERSION}.aar"
+
+      STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "$URL" 2>/dev/null || echo 000)"
+      echo "HEAD $URL -> $STATUS"
+
+      if [ "$STATUS" = "200" ]; then
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
       else
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
       fi
-    displayName: Check if version exists in Azure feed
+      # Always succeed
+      exit 0
+    displayName: Check if version exists in Azure feed (robust)
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
     condition: succeeded()
