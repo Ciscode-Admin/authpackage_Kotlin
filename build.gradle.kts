@@ -1,21 +1,13 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
-    id("maven-publish")
+
+    // Maven Central publishing
+    id("com.vanniktech.maven.publish") version "0.29.0"
 
     // Sonar + coverage
     id("org.sonarqube") version "5.1.0.4882"
     jacoco
-}
-
-import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
-import org.gradle.api.tasks.testing.Test
-
-tasks.withType<Test>().configureEach {
-    extensions.configure(JacocoTaskExtension::class) {
-        isIncludeNoLocationClasses = true
-        excludes = listOf("jdk.internal.*")
-    }
 }
 
 android {
@@ -36,7 +28,7 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug { /* keep */ }
+        debug { }
     }
 
     compileOptions {
@@ -44,54 +36,41 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     kotlinOptions { jvmTarget = "11" }
-
-    publishing {
-        singleVariant("release") { withSourcesJar() }
-    }
-
-    testOptions {
-        unitTests.isIncludeAndroidResources = true
-        unitTests.all {
-            it.jvmArgs(
-                "--add-opens=java.base/java.lang=ALL-UNNAMED",
-                "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-                "--add-opens=java.base/java.io=ALL-UNNAMED",
-                "--add-opens=java.base/java.util=ALL-UNNAMED",
-                "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
-                "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
-                "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
-                "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
-                "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
-                "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
-            )
-        }
-    }
 }
 
-group = "com.ciscod.android"
+group = "io.github.ciscode-ma"
 version = "0.1.0"
 
-publishing {
-    repositories {
-        maven {
-            name = "azureArtifacts"
-            url = uri("https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1")
-            credentials {
-                username = System.getenv("AZURE_ARTIFACTS_USERNAME") ?: "azdo"
-                password = System.getenv("AZURE_ARTIFACTS_TOKEN")
+/* ---- Vanniktech (type-safe) ---- */
+extensions.configure<com.vanniktech.maven.publish.MavenPublishBaseExtension> {
+    publishToMavenCentral(automaticRelease = true)
+    signAllPublications()
+
+    coordinates("io.github.ciscode-ma", "authui", "0.1.0")
+
+    pom {
+        name.set("authui")
+        description.set("Android authentication UI library (AAR).")
+        inceptionYear.set("2025")
+        url.set("https://github.com/CISCODE-MA/authpackage_Kotlin")
+        licenses {
+            license {
+                name.set("The Apache License, Version 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                distribution.set("repo")
             }
         }
-    }
-    publications {
-        create<MavenPublication>("authuiRelease") {
-            groupId = "com.ciscod.android"
-            artifactId = "authui"
-            version = "0.1.0"
-            afterEvaluate { from(components["release"]) }
-            pom {
-                name.set("authui")
-                description.set("Android authentication UI library")
+        developers {
+            developer {
+                id.set("ciscode-ma")
+                name.set("CISCODE-MA")
+                url.set("https://github.com/CISCODE-MA")
             }
+        }
+        scm {
+            url.set("https://github.com/CISCODE-MA/authpackage_Kotlin")
+            connection.set("scm:git:https://github.com/CISCODE-MA/authpackage_Kotlin.git")
+            developerConnection.set("scm:git:ssh://git@github.com/CISCODE-MA/authpackage_Kotlin.git")
         }
     }
 }
@@ -100,10 +79,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
-
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
 
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-moshi:2.9.0")
@@ -114,6 +89,10 @@ dependencies {
     }
     implementation("androidx.browser:browser:1.7.0")
 
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("org.mockito:mockito-core:5.19.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:6.0.0")
@@ -122,16 +101,34 @@ dependencies {
     testImplementation("androidx.test.ext:junit:1.2.1")
 }
 
-/* ---------- JaCoCo coverage for unit tests ---------- */
+/* ---------- JaCoCo ---------- */
 jacoco { toolVersion = "0.8.12" }
 
-tasks.register<JacocoReport>("jacocoTestReport") {
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    extensions.configure(org.gradle.testing.jacoco.plugins.JacocoTaskExtension::class) {
+        isIncludeNoLocationClasses = true
+        excludes = listOf("jdk.internal.*")
+    }
+    jvmArgs(
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+        "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
+        "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+    )
+}
+
+tasks.register<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport") {
     dependsOn("testDebugUnitTest")
 
     reports {
         xml.required.set(true)
         html.required.set(true)
-        // Force a deterministic location:
         xml.outputLocation.set(
             layout.buildDirectory.file("reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
         )
@@ -161,48 +158,33 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     )
 }
 
-tasks.named("sonarqube") {
-    dependsOn("jacocoTestReport")
-}
+tasks.named("sonarqube") { dependsOn("jacocoTestReport") }
 
-/* ---------- SonarQube / SonarCloud ---------- */
+/* ---------- SonarCloud ---------- */
 sonarqube {
     properties {
-        // SonarCloud identifiers
         property("sonar.organization", "ciscode")
         property("sonar.projectKey", "CISCODEAPPS_pkg-android-auth")
         property("sonar.projectName", "pkg-android-auth")
         property("sonar.projectVersion", version.toString())
         property("sonar.host.url", "https://sonarcloud.io")
 
-        // Build the list of existing source / test dirs (so we don't fail if one is missing)
         val sourceDirs = listOf("src/main/java", "src/main/kotlin").filter { file(it).exists() }
         val testDirs   = listOf("src/test/java", "src/test/kotlin").filter { file(it).exists() }
 
         property("sonar.sources", sourceDirs.joinToString(","))
         property("sonar.tests",   testDirs.joinToString(","))
 
-        // Exclusions
         property("sonar.exclusions",
             "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*"
         )
 
-        // Binaries (Debug)
-        property(
-            "sonar.java.binaries",
+        property("sonar.java.binaries",
             "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug"
         )
 
-        // JUnit reports
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
-
-        // (Optional) If you don’t run Android Lint, drop this to remove the warning
-        // property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
-
-        // JaCoCo XML report produced by the jacocoTestReport task
-        property(
-            "sonar.coverage.jacoco.xmlReportPaths",
-            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
-        )
+        property("sonar.coverage.jacoco.xmlReportPaths",
+            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
     }
 }
