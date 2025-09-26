@@ -12,11 +12,11 @@ steps:
   - checkout: self
     fetchDepth: 0
 
-  # ---------- JDK ----------
+  # ---------- JDK 17 (stable for AGP/Robolectric) ----------
   - task: JavaToolInstaller@0
-    displayName: Use Java 21
+    displayName: Use Java 17
     inputs:
-      versionSpec: '21'
+      versionSpec: '17'
       jdkArchitectureOption: x64
       jdkSourceOption: PreInstalled
 
@@ -50,10 +50,11 @@ steps:
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # ---------- Unit tests + coverage ----------
-  - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
+  # ---------- Unit tests + coverage (DO NOT MASK FAILURES) ----------
+  - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon
     displayName: Run unit tests (debug) + coverage
 
+  # Always publish JUnit results (even if tests failed)
   - task: PublishTestResults@2
     displayName: Publish JUnit results
     condition: always()
@@ -61,12 +62,15 @@ steps:
       testResultsFormat: 'JUnit'
       testResultsFiles: '**/build/test-results/testDebugUnitTest/*.xml'
       searchFolder: '$(System.DefaultWorkingDirectory)'
-      failTaskOnFailedTests: false
+      failTaskOnFailedTests: true
       testRunTitle: 'Unit tests (debug)'
 
   # ---------- Discover coverage + paths for Sonar ----------
+  # This never fails the job; it only sets variables if files exist.
   - bash: |
       set -x
+
+      # Coverage XML (prefer standard path)
       XML_DEFAULT="build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
       COV_XML=""
       if [ -f "$XML_DEFAULT" ]; then
@@ -82,18 +86,21 @@ steps:
         echo "##vso[task.setvariable variable=COVERAGE_XML]"
       fi
 
+      # Sources
       SRC_DIRS=()
       [ -d "src/main/java" ] && SRC_DIRS+=("src/main/java")
       [ -d "src/main/kotlin" ] && SRC_DIRS+=("src/main/kotlin")
       SONAR_SOURCES="$(IFS=, ; echo "${SRC_DIRS[*]}")"
       echo "##vso[task.setvariable variable=SONAR_SOURCES]$SONAR_SOURCES"
 
+      # Tests
       TEST_DIRS=()
       [ -d "src/test/java" ] && TEST_DIRS+=("src/test/java")
       [ -d "src/test/kotlin" ] && TEST_DIRS+=("src/test/kotlin")
       SONAR_TESTS="$(IFS=, ; echo "${TEST_DIRS[*]}")"
       echo "##vso[task.setvariable variable=SONAR_TESTS]$SONAR_TESTS"
 
+      # Binaries
       BIN_DIRS=()
       [ -d "build/intermediates/javac/debug/classes" ] && BIN_DIRS+=("build/intermediates/javac/debug/classes")
       [ -d "build/tmp/kotlin-classes/debug" ] && BIN_DIRS+=("build/tmp/kotlin-classes/debug")
@@ -106,14 +113,6 @@ steps:
     displayName: Discover coverage XML, sources, tests, binaries
     continueOnError: true
 
-  - task: PublishBuildArtifacts@1
-    displayName: Attach jacoco XML (debugging)
-    condition: and(always(), ne(variables.COVERAGE_XML, ''))
-    inputs:
-      PathtoPublish: '$(COVERAGE_XML)'
-      ArtifactName: 'coverage-xml'
-      publishLocation: 'Container'
-
   # ---------- SonarCloud (analyze + gate) ----------
   - bash: |
       set -e
@@ -122,22 +121,25 @@ steps:
         -Dsonar.coverage.jacoco.xmlReportPaths="$(COVERAGE_XML)" \
         --stacktrace --no-daemon
     displayName: Run SonarCloud analysis (Gradle)
+    condition: succeeded()   # only if tests step succeeded
 
   - task: SonarCloudPublish@1
     displayName: Publish SonarCloud Quality Gate
     inputs:
       pollingTimeoutSec: '300'
+    condition: succeeded()
 
   # ---------- Build release AAR ----------
   - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
+    condition: succeeded()
 
   # ---------- Azure Artifacts: publish if version not present ----------
   - bash: |
       set -euo pipefail
       GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
       VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
-      ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
+      ARTIFACT=$(grep -Po 'coordinates\("[^"]+",\s*"\K[^"]+(?=",\s*")' build.gradle.kts | head -n1)
       if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
         echo "POM coords not found in build.gradle.kts"; exit 1
       fi
@@ -152,6 +154,7 @@ steps:
     displayName: Check if version exists in Azure feed
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
+    condition: succeeded()
 
   - bash: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
     displayName: Publish authui (release) to Azure Artifacts
@@ -164,7 +167,7 @@ steps:
     displayName: Skip note (Azure)
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
 
-  # ---------- Maven Central: publish with Vanniktech ----------
+  # ---------- Maven Central: publish with Vanniktech (tags only) ----------
   - bash: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace --no-daemon
     displayName: Publish to Maven Central (Vanniktech)
     condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
