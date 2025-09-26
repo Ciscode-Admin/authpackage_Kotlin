@@ -61,15 +61,34 @@ steps:
       testResultsFormat: 'JUnit'
       testResultsFiles: '**/build/test-results/testDebugUnitTest/*.xml'
       searchFolder: '$(System.DefaultWorkingDirectory)'
-      failTaskOnFailedTests: false        # <-- don't fail the pipeline on test failures
+      failTaskOnFailedTests: false
       testRunTitle: 'Unit tests (debug)'
 
-  # Optional: upload the HTML report so you can open it from the run
+  # ---------- Locate unit-test HTML report (robust) ----------
+  - bash: |
+      set -x
+      # Prefer module-local path if present; else search
+      CANDIDATE="build/reports/tests/testDebugUnitTest"
+      if [ -d "$CANDIDATE" ]; then
+        HTML_DIR="$CANDIDATE"
+      else
+        # Find the newest matching directory anywhere under the repo
+        HTML_DIR="$(find "$PWD" -type d -path '*/build/reports/tests/testDebugUnitTest' -printf '%T@ %p\n' 2>/dev/null | sort -nr | awk 'NR==1{print $2}')"
+      fi
+      echo "UNIT_TEST_HTML_DIR resolved to: ${HTML_DIR:-<none>}"
+      if [ -n "$HTML_DIR" ] && [ -d "$HTML_DIR" ]; then
+        echo "##vso[task.setvariable variable=UNIT_TEST_HTML_DIR]$HTML_DIR"
+      else
+        echo "##vso[task.setvariable variable=UNIT_TEST_HTML_DIR]"
+      fi
+    displayName: Locate unit-test HTML report
+    continueOnError: true
+
   - task: PublishBuildArtifacts@1
     displayName: Attach unit-test HTML report
-    condition: always()
+    condition: and(always(), ne(variables.UNIT_TEST_HTML_DIR, ''))
     inputs:
-      PathtoPublish: '$(System.DefaultWorkingDirectory)/**/build/reports/tests/testDebugUnitTest'
+      PathtoPublish: '$(UNIT_TEST_HTML_DIR)'
       ArtifactName: 'unit-test-report'
       publishLocation: 'Container'
 
@@ -174,7 +193,6 @@ steps:
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
 
   # ---------- Maven Central: publish with Vanniktech ----------
-  # Runs only on tags like refs/tags/v0.1.0 by default.
   - bash: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace --no-daemon
     displayName: Publish to Maven Central (Vanniktech)
     condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
