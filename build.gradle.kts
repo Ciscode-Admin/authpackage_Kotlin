@@ -2,8 +2,11 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
 
-    // Maven Central publishing (Vanniktech 0.29 is stable)
+    // Maven Central publishing (Vanniktech)
     id("com.vanniktech.maven.publish") version "0.29.0"
+
+    // Azure Artifacts publishing (plain maven-publish)
+    id("maven-publish")
 
     // Sonar + coverage
     id("org.sonarqube") version "5.1.0.4882"
@@ -31,7 +34,7 @@ android {
         debug { }
     }
 
-    // Align with CI JDK for deterministic tests
+    // Align with CI JDK
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -41,18 +44,15 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.all {
-            // Deterministic runtime on CI
             it.systemProperty("user.timezone", "UTC")
             it.systemProperty("java.awt.headless", "true")
 
-            // Detailed failures in CI logs
             it.testLogging {
                 events("FAILED", "SKIPPED")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
                 showStandardStreams = true
             }
 
-            // Keep your --add-opens for Robolectric/Mockito on JDK 17+
             it.jvmArgs(
                 "--add-opens=java.base/java.lang=ALL-UNNAMED",
                 "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
@@ -69,15 +69,14 @@ android {
     }
 }
 
-// Run tests sequentially in CI for stability (optional but helpful)
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     maxParallelForks = 1
 }
 
-group = "io.github.ciscode-ma"
+group = "io.github.ciscode-ma" // project coords for Maven Central via Vanniktech
 version = "0.1.0"
 
-/* ---- Vanniktech Maven Publish ---- */
+/* ---- Vanniktech (Maven Central) ---- */
 extensions.configure<com.vanniktech.maven.publish.MavenPublishBaseExtension> {
     publishToMavenCentral(automaticRelease = true)
     signAllPublications()
@@ -107,6 +106,39 @@ extensions.configure<com.vanniktech.maven.publish.MavenPublishBaseExtension> {
             url.set("https://github.com/CISCODE-MA/authpackage_Kotlin")
             connection.set("scm:git:https://github.com/CISCODE-MA/authpackage_Kotlin.git")
             developerConnection.set("scm:git:ssh://git@github.com/CISCODE-MA/authpackage_Kotlin.git")
+        }
+    }
+}
+
+/* ---- Azure Artifacts (maven-publish) ----
+ * Publication name: authuiRelease
+ * Repository name:  azureArtifacts
+ * Task generated:   publishAuthuiReleasePublicationToAzureArtifactsRepository
+ */
+publishing {
+    repositories {
+        maven {
+            name = "azureArtifacts"
+            url = uri("https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1")
+            credentials {
+                username = System.getenv("AZURE_ARTIFACTS_USERNAME") ?: "azdo"
+                password = System.getenv("AZURE_ARTIFACTS_TOKEN")
+            }
+        }
+    }
+    publications {
+        create<MavenPublication>("authuiRelease") {
+            // Use Azure-specific coords while keeping Maven Central coords via Vanniktech
+            groupId = "com.ciscod.android"
+            artifactId = "authui"
+            version = project.version.toString()
+
+            afterEvaluate { from(components["release"]) }
+
+            pom {
+                name.set("authui")
+                description.set("Android authentication UI library")
+            }
         }
     }
 }
