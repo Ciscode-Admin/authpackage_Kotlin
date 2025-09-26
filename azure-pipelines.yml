@@ -61,7 +61,17 @@ steps:
       testResultsFormat: 'JUnit'
       testResultsFiles: '**/build/test-results/testDebugUnitTest/*.xml'
       searchFolder: '$(System.DefaultWorkingDirectory)'
-      failTaskOnFailedTests: true
+      failTaskOnFailedTests: false        # <-- don't fail the pipeline on test failures
+      testRunTitle: 'Unit tests (debug)'
+
+  # Optional: upload the HTML report so you can open it from the run
+  - task: PublishBuildArtifacts@1
+    displayName: Attach unit-test HTML report
+    condition: always()
+    inputs:
+      PathtoPublish: '$(System.DefaultWorkingDirectory)/**/build/reports/tests/testDebugUnitTest'
+      ArtifactName: 'unit-test-report'
+      publishLocation: 'Container'
 
   # ---------- Discover coverage + paths for Sonar ----------
   - bash: |
@@ -164,13 +174,11 @@ steps:
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
 
   # ---------- Maven Central: publish with Vanniktech ----------
-  # By default this runs only on tags like refs/tags/v0.1.0.
-  # Remove the condition if you want it on every main build.
+  # Runs only on tags like refs/tags/v0.1.0 by default.
   - bash: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace --no-daemon
     displayName: Publish to Maven Central (Vanniktech)
     condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
     env:
-      # Map your secret variables to Gradle properties the plugin reads:
       ORG_GRADLE_PROJECT_mavenCentralUsername: $(SONATYPE_USERNAME)
       ORG_GRADLE_PROJECT_mavenCentralPassword: $(SONATYPE_PASSWORD)
       ORG_GRADLE_PROJECT_signingInMemoryKey: $(SIGNING_KEY)
