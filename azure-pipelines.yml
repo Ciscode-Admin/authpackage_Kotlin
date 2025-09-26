@@ -8,22 +8,19 @@ variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 steps:
-  # ---------- Checkout ----------
   - checkout: self
     fetchDepth: 0
 
-  # ---------- JDK ----------
   - task: JavaToolInstaller@0
-    displayName: Use Java 21
+    displayName: Use Java 17
     inputs:
-      versionSpec: '21'
+      versionSpec: '17'
       jdkArchitectureOption: x64
       jdkSourceOption: PreInstalled
 
   - script: chmod +x ./gradlew
     displayName: Make gradlew executable
 
-  # ---------- Cache Gradle ----------
   - task: Cache@2
     displayName: Cache Gradle
     inputs:
@@ -32,7 +29,6 @@ steps:
         gradle | "$(Agent.OS)"
       path: '$(HOME)/.gradle/caches'
 
-  # ---------- Android SDK ----------
   - bash: |
       set -e
       yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
@@ -40,7 +36,6 @@ steps:
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
     displayName: Ensure Android SDK 35 is installed
 
-  # ---------- SonarCloud (prepare) ----------
   - task: SonarCloudPrepare@1
     displayName: Prepare SonarCloud analysis
     inputs:
@@ -50,8 +45,7 @@ steps:
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # ---------- Unit tests + coverage ----------
-  - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
+  - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon
     displayName: Run unit tests (debug) + coverage
 
   - task: PublishTestResults@2
@@ -62,8 +56,8 @@ steps:
       testResultsFiles: '**/build/test-results/testDebugUnitTest/*.xml'
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
+      testRunTitle: 'Unit tests (debug)'
 
-  # ---------- Discover coverage + paths for Sonar ----------
   - bash: |
       set -x
       XML_DEFAULT="build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
@@ -105,15 +99,6 @@ steps:
     displayName: Discover coverage XML, sources, tests, binaries
     continueOnError: true
 
-  - task: PublishBuildArtifacts@1
-    displayName: Attach jacoco XML (debugging)
-    condition: and(always(), ne(variables.COVERAGE_XML, ''))
-    inputs:
-      PathtoPublish: '$(COVERAGE_XML)'
-      ArtifactName: 'coverage-xml'
-      publishLocation: 'Container'
-
-  # ---------- SonarCloud (analyze + gate) ----------
   - bash: |
       set -e
       ./gradlew sonarqube \
@@ -121,36 +106,50 @@ steps:
         -Dsonar.coverage.jacoco.xmlReportPaths="$(COVERAGE_XML)" \
         --stacktrace --no-daemon
     displayName: Run SonarCloud analysis (Gradle)
+    condition: succeeded()
 
   - task: SonarCloudPublish@1
     displayName: Publish SonarCloud Quality Gate
     inputs:
       pollingTimeoutSec: '300'
+    condition: succeeded()
 
-  # ---------- Build release AAR ----------
   - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
+    condition: succeeded()
 
   # ---------- Azure Artifacts: publish if version not present ----------
+  # Robust check that NEVER fails the job. We hard-code Azure coords to
+  # match the Gradle publication (groupId=com.ciscod.android, artifactId=authui).
   - bash: |
-      set -euo pipefail
-      GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
-      VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
-      ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
-      if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
-        echo "POM coords not found in build.gradle.kts"; exit 1
+      set +e  # do not fail this step
+      VERSION="$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' build.gradle.kts)"
+      AZ_GROUP="com.ciscod.android"
+      AZ_ARTIFACT="authui"
+
+      if [ -z "$VERSION" ]; then
+        echo "Could not parse version from build.gradle.kts; default to publishing."
+        echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
+        exit 0
       fi
-      GROUP_PATH=${GROUP//./\/}
-      URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.aar"
-      STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
-      if [ "${STATUS}" = "200" ]; then
+
+      GROUP_PATH=${AZ_GROUP//./\/}
+      URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${AZ_ARTIFACT}/${VERSION}/${AZ_ARTIFACT}-${VERSION}.aar"
+
+      STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "$URL" 2>/dev/null || echo 000)"
+      echo "HEAD $URL -> $STATUS"
+
+      if [ "$STATUS" = "200" ]; then
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
       else
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
       fi
-    displayName: Check if version exists in Azure feed
+      # Always succeed
+      exit 0
+    displayName: Check if version exists in Azure feed (robust)
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
+    condition: succeeded()
 
   - bash: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
     displayName: Publish authui (release) to Azure Artifacts
@@ -163,14 +162,11 @@ steps:
     displayName: Skip note (Azure)
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
 
-  # ---------- Maven Central: publish with Vanniktech ----------
-  # By default this runs only on tags like refs/tags/v0.1.0.
-  # Remove the condition if you want it on every main build.
+  # ---------- Maven Central: publish with Vanniktech (tags only) ----------
   - bash: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace --no-daemon
     displayName: Publish to Maven Central (Vanniktech)
     condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
     env:
-      # Map your secret variables to Gradle properties the plugin reads:
       ORG_GRADLE_PROJECT_mavenCentralUsername: $(SONATYPE_USERNAME)
       ORG_GRADLE_PROJECT_mavenCentralPassword: $(SONATYPE_PASSWORD)
       ORG_GRADLE_PROJECT_signingInMemoryKey: $(SIGNING_KEY)
