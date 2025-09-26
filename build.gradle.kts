@@ -2,7 +2,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
 
-    // Maven Central publishing
+    // Maven Central publishing (Vanniktech 0.29 is stable)
     id("com.vanniktech.maven.publish") version "0.29.0"
 
     // Sonar + coverage
@@ -31,17 +31,53 @@ android {
         debug { }
     }
 
+    // Align with CI JDK for deterministic tests
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "11" }
+    kotlinOptions { jvmTarget = "17" }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            // Deterministic runtime on CI
+            it.systemProperty("user.timezone", "UTC")
+            it.systemProperty("java.awt.headless", "true")
+
+            // Detailed failures in CI logs
+            it.testLogging {
+                events("FAILED", "SKIPPED")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                showStandardStreams = true
+            }
+
+            // Keep your --add-opens for Robolectric/Mockito on JDK 17+
+            it.jvmArgs(
+                "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+                "--add-opens=java.base/java.io=ALL-UNNAMED",
+                "--add-opens=java.base/java.util=ALL-UNNAMED",
+                "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+                "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+                "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+                "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
+                "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
+                "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
+            )
+        }
+    }
+}
+
+// Run tests sequentially in CI for stability (optional but helpful)
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    maxParallelForks = 1
 }
 
 group = "io.github.ciscode-ma"
 version = "0.1.0"
 
-/* ---- Vanniktech (type-safe) ---- */
+/* ---- Vanniktech Maven Publish ---- */
 extensions.configure<com.vanniktech.maven.publish.MavenPublishBaseExtension> {
     publishToMavenCentral(automaticRelease = true)
     signAllPublications()
@@ -109,18 +145,6 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
         isIncludeNoLocationClasses = true
         excludes = listOf("jdk.internal.*")
     }
-    jvmArgs(
-        "--add-opens=java.base/java.lang=ALL-UNNAMED",
-        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-        "--add-opens=java.base/java.io=ALL-UNNAMED",
-        "--add-opens=java.base/java.util=ALL-UNNAMED",
-        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
-        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
-        "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
-        "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
-        "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
-        "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
-    )
 }
 
 tasks.register<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport") {
@@ -158,8 +182,6 @@ tasks.register<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport")
     )
 }
 
-tasks.named("sonarqube") { dependsOn("jacocoTestReport") }
-
 /* ---------- SonarCloud ---------- */
 sonarqube {
     properties {
@@ -175,16 +197,20 @@ sonarqube {
         property("sonar.sources", sourceDirs.joinToString(","))
         property("sonar.tests",   testDirs.joinToString(","))
 
-        property("sonar.exclusions",
+        property(
+            "sonar.exclusions",
             "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*"
         )
 
-        property("sonar.java.binaries",
+        property(
+            "sonar.java.binaries",
             "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug"
         )
 
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
-        property("sonar.coverage.jacoco.xmlReportPaths",
-            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
+        property(
+            "sonar.coverage.jacoco.xmlReportPaths",
+            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
+        )
     }
 }
