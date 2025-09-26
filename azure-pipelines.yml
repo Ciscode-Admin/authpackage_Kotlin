@@ -8,9 +8,11 @@ variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 steps:
+  # ---------- Checkout ----------
   - checkout: self
     fetchDepth: 0
 
+  # ---------- JDK ----------
   - task: JavaToolInstaller@0
     displayName: Use Java 21
     inputs:
@@ -21,6 +23,7 @@ steps:
   - script: chmod +x ./gradlew
     displayName: Make gradlew executable
 
+  # ---------- Cache Gradle ----------
   - task: Cache@2
     displayName: Cache Gradle
     inputs:
@@ -29,6 +32,7 @@ steps:
         gradle | "$(Agent.OS)"
       path: '$(HOME)/.gradle/caches'
 
+  # ---------- Android SDK ----------
   - bash: |
       set -e
       yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
@@ -36,6 +40,7 @@ steps:
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
     displayName: Ensure Android SDK 35 is installed
 
+  # ---------- SonarCloud (prepare) ----------
   - task: SonarCloudPrepare@1
     displayName: Prepare SonarCloud analysis
     inputs:
@@ -45,6 +50,7 @@ steps:
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
+  # ---------- Unit tests + coverage ----------
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
@@ -57,10 +63,9 @@ steps:
       searchFolder: '$(System.DefaultWorkingDirectory)'
       failTaskOnFailedTests: true
 
-  # ---------- Robust discovery that NEVER fails the job ----------
+  # ---------- Discover coverage + paths for Sonar ----------
   - bash: |
-      set -x  # debug output; do NOT use -u
-      # 1) Find the JaCoCo XML (prefer the standard path; otherwise pick the largest match)
+      set -x
       XML_DEFAULT="build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
       COV_XML=""
       if [ -f "$XML_DEFAULT" ]; then
@@ -76,42 +81,30 @@ steps:
         echo "##vso[task.setvariable variable=COVERAGE_XML]"
       fi
 
-      # 2) Sources (only include existing)
       SRC_DIRS=()
       [ -d "src/main/java" ] && SRC_DIRS+=("src/main/java")
       [ -d "src/main/kotlin" ] && SRC_DIRS+=("src/main/kotlin")
       SONAR_SOURCES="$(IFS=, ; echo "${SRC_DIRS[*]}")"
-      echo "SONAR_SOURCES=${SONAR_SOURCES:-<none>}"
       echo "##vso[task.setvariable variable=SONAR_SOURCES]$SONAR_SOURCES"
 
-      # 3) Tests (avoid missing-folder error)
       TEST_DIRS=()
       [ -d "src/test/java" ] && TEST_DIRS+=("src/test/java")
       [ -d "src/test/kotlin" ] && TEST_DIRS+=("src/test/kotlin")
       SONAR_TESTS="$(IFS=, ; echo "${TEST_DIRS[*]}")"
-      echo "SONAR_TESTS=${SONAR_TESTS:-<none>}"
       echo "##vso[task.setvariable variable=SONAR_TESTS]$SONAR_TESTS"
 
-      # 4) Binaries (AGP 8.x debug outputs + any classes.jar)
       BIN_DIRS=()
       [ -d "build/intermediates/javac/debug/classes" ] && BIN_DIRS+=("build/intermediates/javac/debug/classes")
       [ -d "build/tmp/kotlin-classes/debug" ] && BIN_DIRS+=("build/tmp/kotlin-classes/debug")
       mapfile -t JARS < <(find build/intermediates -type f -name classes.jar 2>/dev/null || true)
       BIN_LIST="$(IFS=, ; echo "${BIN_DIRS[*]}")"
       for j in "${JARS[@]}"; do
-        if [ -z "$BIN_LIST" ]; then
-          BIN_LIST="$j"
-        else
-          BIN_LIST="$BIN_LIST,$j"
-        fi
+        if [ -z "$BIN_LIST" ]; then BIN_LIST="$j"; else BIN_LIST="$BIN_LIST,$j"; fi
       done
-      echo "SONAR_BINARIES:"
-      echo "${BIN_LIST:-<none>}" | tr ',' '\n'
       echo "##vso[task.setvariable variable=SONAR_BINARIES]$BIN_LIST"
     displayName: Discover coverage XML, sources, tests, binaries
-    continueOnError: true   # never fail the job here
+    continueOnError: true
 
-  # Only publish the XML if we actually found it
   - task: PublishBuildArtifacts@1
     displayName: Attach jacoco XML (debugging)
     condition: and(always(), ne(variables.COVERAGE_XML, ''))
@@ -120,6 +113,7 @@ steps:
       ArtifactName: 'coverage-xml'
       publishLocation: 'Container'
 
+  # ---------- SonarCloud (analyze + gate) ----------
   - bash: |
       set -e
       ./gradlew sonarqube \
@@ -133,9 +127,11 @@ steps:
     inputs:
       pollingTimeoutSec: '300'
 
-  - bash: ./gradlew :assembleRelease
+  # ---------- Build release AAR ----------
+  - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
 
+  # ---------- Azure Artifacts: publish if version not present ----------
   - bash: |
       set -euo pipefail
       GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
@@ -152,43 +148,30 @@ steps:
       else
         echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
       fi
-    displayName: Check if version exists in feed
+    displayName: Check if version exists in Azure feed
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
   - bash: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
-    displayName: Publish authui (release) to android-packages
+    displayName: Publish authui (release) to Azure Artifacts
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'true'))
     env:
       AZURE_ARTIFACTS_USERNAME: 'azdo'
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
-  - bash: echo "Publish skipped (same version already present)."
-    displayName: Skip note
+  - bash: echo "Azure publish skipped (same version already present)."
+    displayName: Skip note (Azure)
     condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
 
-  # -------- Mirror repo to GitHub (force push main, no fetch) --------
-  - bash: |
-      set -euo pipefail
-      set +x  # avoid echoing secrets
-
-      git config --global --add safe.directory "$PWD"
-
-      printf "machine github.com\nlogin %s\npassword %s\n" "CISCODE-MA" "$(GITHUB_PAT)" > ~/.netrc
-      chmod 600 ~/.netrc
-
-      git config user.name "Azure Pipelines"
-      git config user.email "azure-pipelines@users.noreply.github.com"
-
-      if git remote get-url github >/dev/null 2>&1; then
-        git remote remove github
-      fi
-      git remote add github https://github.com/CISCODE-MA/authpackage_Kotlin.git
-
-      # Fully-qualify ref in case 'main' doesn't exist yet
-      GIT_TERMINAL_PROMPT=0 git push github HEAD:refs/heads/main --force
-
-      rm -f ~/.netrc
-    displayName: Mirror source to GitHub main (force, fully qualified)
+  # ---------- Maven Central: publish with Vanniktech ----------
+  # By default this runs only on tags like refs/tags/v0.1.0.
+  # Remove the condition if you want it on every main build.
+  - bash: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace --no-daemon
+    displayName: Publish to Maven Central (Vanniktech)
+    condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/'))
     env:
-      GITHUB_PAT: $(GITHUB_PAT)
+      # Map your secret variables to Gradle properties the plugin reads:
+      ORG_GRADLE_PROJECT_mavenCentralUsername: $(SONATYPE_USERNAME)
+      ORG_GRADLE_PROJECT_mavenCentralPassword: $(SONATYPE_PASSWORD)
+      ORG_GRADLE_PROJECT_signingInMemoryKey: $(SIGNING_KEY)
+      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: $(SIGNING_PASSWORD)
