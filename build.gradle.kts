@@ -81,4 +81,5 @@ dependencies {
         exclude(group = "com.microsoft.device.display", module = "display-mask")
     }
     implementation("androidx.browser:browser:1.7.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 }

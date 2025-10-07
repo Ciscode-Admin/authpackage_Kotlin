@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lu_profile_status_active">Active</string>
+    <string name="lu_nav_profile">Profile</string>
+    <string name="lu_logout">Log out</string>
+</resources>

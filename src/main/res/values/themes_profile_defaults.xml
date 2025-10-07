@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Alias so any reference to ThemeOverlay.LoginUi resolves -->
+    <style name="ThemeOverlay.LoginUi" parent="ThemeOverlay.LoginUi.ProfileDefaults" />
+
+    <!-- Theme overlay providing default values for the Profile screen -->
+    <style name="ThemeOverlay.LoginUi.ProfileDefaults">
+        <item name="lu_profileHeaderColor">?attr/colorPrimary</item>
+        <item name="lu_profileCardColor">?attr/colorSurface</item>
+        <item name="lu_profilePrimaryTextColor">?attr/colorOnSurface</item>
+        <item name="lu_profileButtonColor">?attr/colorPrimary</item>
+    </style>
+</resources>
