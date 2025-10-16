@@ -2,6 +2,7 @@ package com.example.loginui
 
 import androidx.fragment.app.Fragment
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
 import android.util.TypedValue
@@ -57,6 +58,9 @@ class ProfileFragment : Fragment() {
     // Card
     private lateinit var infoCard: MaterialCardView
     @ColorInt private var cardColorViewMode: Int = 0
+    private var origCardColor: ColorStateList? = null
+    private var origCardElevation: Float = 0f
+    private var origUseCompatPadding: Boolean = false
 
     // Actions
     private lateinit var btnEditIcon: ImageButton
@@ -66,7 +70,6 @@ class ProfileFragment : Fragment() {
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
-        // Apply theme overlay so ?attr/lu_* resolve to host/theme or library defaults.
         val themedCtx: Context = ContextThemeWrapper(
             requireContext(),
             R.style.ThemeOverlay_LoginUi_ProfileDefaults
@@ -95,11 +98,16 @@ class ProfileFragment : Fragment() {
         infoCard = view.findViewById(R.id.infoCard)
         cardColorViewMode = resolveAttrColor(R.attr.lu_profileCardColor)
 
+        // Capture original card appearance to restore after editing
+        origCardColor = infoCard.cardBackgroundColor
+        origCardElevation = infoCard.cardElevation
+        origUseCompatPadding = infoCard.useCompatPadding
+
         btnEditIcon = view.findViewById(R.id.btnEditIcon)
         btnSaveFab = view.findViewById(R.id.btnSaveFab)
         btnLogout = view.findViewById(R.id.btnLogout)
 
-        // Enter edit: show inputs and make the card transparent (inputs stay white)
+        // Enter edit → transparent & flat card; inputs stay white
         btnEditIcon.setOnClickListener {
             inputName.setText(textName.text)
             inputEmail.setText(textEmail.text)
@@ -116,6 +124,7 @@ class ProfileFragment : Fragment() {
 
             infoCard.setCardBackgroundColor(Color.TRANSPARENT)
             infoCard.cardElevation = 0f
+            infoCard.useCompatPadding = false
 
             motion.transitionToEnd()
         }
@@ -196,20 +205,19 @@ class ProfileFragment : Fragment() {
                         val finalEmail = updated.email ?: textEmail.text.toString()
                         setAvatarInitial(shownName, finalEmail)
 
-                        // Swap back to view mode (nested views)
+                        // Back to view mode
                         textName.visibility = View.VISIBLE
                         inputNameLayout.visibility = View.GONE
                         textEmail.visibility = View.VISIBLE
                         inputEmailLayout.visibility = View.GONE
 
-                        // Restore card background/elevation for view mode
-                        infoCard.setCardBackgroundColor(cardColorViewMode)
-                        val defaultElevationDp = 4f
-                        infoCard.cardElevation = defaultElevationDp * resources.displayMetrics.density
+                        // Restore exact original card look
+                        origCardColor?.let { infoCard.setCardBackgroundColor(it) }
+                        infoCard.cardElevation = origCardElevation
+                        infoCard.useCompatPadding = origUseCompatPadding
 
                         motion.transitionToStart()
 
-                        // Emit result for host if they want to react
                         parentFragmentManager.setFragmentResult(
                             RESULT_KEY,
                             Bundle().apply {
