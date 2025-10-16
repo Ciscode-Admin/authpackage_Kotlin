@@ -7,19 +7,19 @@
         motion:constraintSetEnd="@id/end"
         motion:duration="500">
 
-        <!-- Tap pen → edit -->
+        <!-- pen → edit -->
         <OnClick
             motion:targetId="@id/btnEditIcon"
             motion:clickAction="transitionToEnd" />
 
-        <!-- Tap save → view -->
-<!--        <OnClick-->
-<!--            motion:targetId="@id/btnSaveFab"-->
-<!--            motion:clickAction="transitionToStart" />-->
+        <!-- save → view handled in code (after save), but you can also add:
+        <OnClick motion:targetId="@id/btnSaveFab" motion:clickAction="transitionToStart" />
+        -->
     </Transition>
 
     <!-- VIEW MODE -->
     <ConstraintSet android:id="@+id/start">
+
         <Constraint android:id="@id/colorExpander">
             <Layout
                 android:layout_width="0dp"
@@ -29,6 +29,22 @@
                 motion:layout_constraintEnd_toEndOf="parent"/>
         </Constraint>
 
+        <!-- Show black labels -->
+        <Constraint android:id="@id/labelNameView">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
+        <Constraint android:id="@id/labelEmailView">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
+
+        <!-- Hide white labels -->
+        <Constraint android:id="@id/labelNameEdit">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
+        <Constraint android:id="@id/labelEmailEdit">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
+
         <Constraint android:id="@id/btnEditIcon">
             <PropertySet android:visibility="visible"/>
         </Constraint>
@@ -44,16 +60,22 @@
         <Constraint android:id="@id/textName">
             <PropertySet android:visibility="visible"/>
         </Constraint>
+        <Constraint android:id="@id/textEmail">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
 
         <Constraint android:id="@id/inputNameLayout">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
+        <Constraint android:id="@id/inputEmailLayout">
             <PropertySet android:visibility="gone"/>
         </Constraint>
     </ConstraintSet>
 
     <!-- EDIT MODE -->
     <ConstraintSet android:id="@+id/end">
-        <Constraint android:id="@id/colorExpander"
-            motion:visibilityMode="ignore">
+
+        <Constraint android:id="@id/colorExpander" motion:visibilityMode="ignore">
             <Layout
                 android:layout_width="0dp"
                 android:layout_height="0dp"
@@ -63,6 +85,20 @@
                 motion:layout_constraintEnd_toEndOf="parent"/>
         </Constraint>
 
+        <!-- Hide black labels / show white labels -->
+        <Constraint android:id="@id/labelNameView">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
+        <Constraint android:id="@id/labelEmailView">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
+        <Constraint android:id="@id/labelNameEdit">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
+        <Constraint android:id="@id/labelEmailEdit">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
+
         <Constraint android:id="@id/btnEditIcon">
             <PropertySet android:visibility="gone"/>
         </Constraint>
@@ -78,8 +114,14 @@
         <Constraint android:id="@id/textName">
             <PropertySet android:visibility="gone"/>
         </Constraint>
+        <Constraint android:id="@id/textEmail">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
 
         <Constraint android:id="@id/inputNameLayout">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
+        <Constraint android:id="@id/inputEmailLayout">
             <PropertySet android:visibility="visible"/>
         </Constraint>
     </ConstraintSet>

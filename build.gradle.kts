@@ -82,4 +82,5 @@ dependencies {
     }
     implementation("androidx.browser:browser:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("com.squareup.okhttp3:okhttp-urlconnection:4.12.0")
 }

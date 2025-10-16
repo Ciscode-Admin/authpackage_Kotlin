@@ -3,8 +3,8 @@ package com.example.loginui.net
 import retrofit2.Call
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
-import retrofit2.http.PUT
 
 interface AuthService {
     @POST("api/auth/clients/login")
@@ -16,9 +16,14 @@ interface AuthService {
     @POST("api/auth/microsoft/exchange")
     fun exchangeMicrosoft(@Body body: MsExchangeRequest): Call<LoginResponse>
 
-    @GET("me")
-    fun me(): Call<UserDto>
+    @GET("api/auth/client/me")
+    fun me(): Call<MeResponse>
 
-    @PUT("me")
+    @PATCH("api/auth/client/me")
     fun updateMe(@Body body: UpdateUserRequest): Call<UserDto>
+
+    @POST("api/auth/refresh-token")
+    fun refreshToken(): Call<RefreshResponse>
 }
+
+data class RefreshResponse(val accessToken: String, val type: String? = null)
