@@ -7,21 +7,16 @@ pool:
 variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
-# 👇 Add these secure pipeline variables in Azure DevOps:
-#   CENTRAL_TOKEN_ID       (the short ID from Central “Tokens”, e.g. Yn8Q5P)
-#   CENTRAL_TOKEN_SECRET   (the secret shown once when creating the token)
-# Also keep your Sonar service connection.
-
 steps:
   - checkout: self
     fetchDepth: 0
 
   - task: JavaToolInstaller@0
-    displayName: Use Java 21
     inputs:
       versionSpec: '21'
-      jdkArchitectureOption: x64
-      jdkSourceOption: PreInstalled
+      jdkArchitectureOption: 'x64'
+      jdkSourceOption: 'PreInstalled'
+    displayName: Use Java 21
 
   - script: chmod +x ./gradlew
     displayName: Make gradlew executable
@@ -64,32 +59,18 @@ steps:
     inputs:
       pollingTimeoutSec: '300'
 
-  # ---- BUILD RELEASE AAR ----
-  - bash: ./gradlew :assembleRelease --stacktrace --no-daemon
+  # Build the AAR
+  - bash: ./gradlew :assembleRelease
     displayName: Build release AAR
 
-  # ---- VERIFY CENTRAL PORTAL TOKEN (Basic auth to Central API) ----
-  - bash: |
-      set -euo pipefail
-      echo "Checking credentials against central.sonatype.com ..."
-      B64=$(printf '%s:%s' "$CENTRAL_TOKEN_ID" "$CENTRAL_TOKEN_SECRET" | base64 -w0)
-      CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
-        -H "Authorization: Basic ${B64}" \
-        https://central.sonatype.com/api/v1/publisher/status)
-      echo "HTTP=${CODE}"
-      if [ "$CODE" != "200" ]; then
-        echo "Failed auth. Central Portal token (ID/SECRET) is wrong or missing."
-        exit 1
-      fi
-      echo "Central token OK."
-    displayName: Verify Central Portal token
+  # ---- PUBLISH TO MAVEN CENTRAL (Central Portal) ----
+  # nmcp will package your publication(s) and upload them to Central Portal.
+  - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
+    displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
-      CENTRAL_TOKEN_ID: $(CENTRAL_TOKEN_ID)
-      CENTRAL_TOKEN_SECRET: $(CENTRAL_TOKEN_SECRET)
+      CENTRAL_USERNAME: $(CENTRAL_USERNAME)   # set these two secrets in your pipeline variables
+      CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
 
-  # ---- PUBLISH TO MAVEN CENTRAL (NEW PORTAL) ----
-  - bash: ./gradlew publishAllPublicationsToCentralPortal --stacktrace --no-daemon
-    displayName: Publish to Maven Central (Central Portal)
-    env:
-      CENTRAL_TOKEN_ID: $(CENTRAL_TOKEN_ID)
-      CENTRAL_TOKEN_SECRET: $(CENTRAL_TOKEN_SECRET)
+  # Optional: note afterwards
+  - bash: echo "Uploaded to Central Portal."
+    displayName: Done
