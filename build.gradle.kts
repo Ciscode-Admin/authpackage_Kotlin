@@ -2,7 +2,8 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     id("maven-publish")
-    id("org.sonarqube") version "5.1.0.4882" // SonarQube Gradle plugin
+    id("signing")
+    id("org.sonarqube") version "5.1.0.4882"
     jacoco
 }
 
@@ -24,33 +25,25 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug {
-            // keep debug so we can point Sonar to debug outputs
-        }
+        debug { }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
+    kotlinOptions { jvmTarget = "11" }
 
     publishing {
-        singleVariant("release") {
-            withSourcesJar()
-        }
+        singleVariant("release") { withSourcesJar() }
     }
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
-    }
-
-    // Use the same JaCoCo version everywhere
-    testOptions.unitTests.all {
-        it.extensions.configure<JacocoTaskExtension> {
-            isIncludeNoLocationClasses = true
+        unitTests.all {
+            it.extensions.configure<JacocoTaskExtension> {
+                isIncludeNoLocationClasses = true
+            }
         }
     }
 }
@@ -60,11 +53,14 @@ version = "0.1.2"
 
 publishing {
     repositories {
-        // Publish to Sonatype (Maven Central)
+        // Sonatype (OSSRH) - s01 host
         maven {
             name = "sonatype"
             url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
+            // Ensure we always use HTTPS
+            isAllowInsecureProtocol = false
             credentials {
+                // These MUST be the User Token username/password from Sonatype profile
                 username = System.getenv("SONATYPE_USERNAME")
                 password = System.getenv("SONATYPE_PASSWORD")
             }
@@ -76,15 +72,41 @@ publishing {
             artifactId = "authui"
             version = "0.1.2"
             afterEvaluate { from(components["release"]) }
+
             pom {
                 name.set("authui")
                 description.set("Android authentication UI library")
-                // (Optional) If you already had these in 0.1.1 via gradle.properties, you can omit here.
-                // licenses { license { name.set("The Apache License, Version 2.0"); url.set("http://www.apache.org/licenses/LICENSE-2.0.txt") } }
-                // scm { url.set("https://github.com/<your-org>/<your-repo>") }
-                // developers { developer { id.set("ciscode"); name.set("CISCODE") } }
+                url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
+                licenses {
+                    license {
+                        name.set("The Apache License, Version 2.0")
+                        url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+                        distribution.set("repo")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
+                    connection.set("scm:git:https://github.com/CISCODEAPPS/pkg-android-auth.git")
+                    developerConnection.set("scm:git:https://github.com/CISCODEAPPS/pkg-android-auth.git")
+                }
+                developers {
+                    developer {
+                        id.set("ciscode")
+                        name.set("CISCODE")
+                    }
+                }
             }
         }
+    }
+}
+
+// Sign the Maven publication (required by Maven Central)
+signing {
+    val signingKey = System.getenv("SIGNING_KEY")
+    val signingPass = System.getenv("SIGNING_PASSWORD")
+    if (!signingKey.isNullOrBlank() && !signingPass.isNullOrBlank()) {
+        useInMemoryPgpKeys(signingKey, signingPass)
+        sign(publishing.publications["authuiRelease"])
     }
 }
 
@@ -117,41 +139,26 @@ dependencies {
 }
 
 /* ---------- JaCoCo coverage for unit tests ---------- */
-jacoco {
-    toolVersion = "0.8.12"
-}
+jacoco { toolVersion = "0.8.12" }
 
 val excludedClasses = listOf(
-    // android/generated
     "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
-    // Dagger/Hilt / MembersInjector etc.
     "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*",
     "**/*_Factory*.*", "**/*_Provide*Factory*.*",
-    // Kotlin synthetics/companions
     "**/*Companion*.*", "**/*Module*.*",
-    // ViewBinding/DataBinding
     "**/*Binding.*", "**/*BindingImpl.*",
-    // Jetpack Compose (if any)
     "**/*ComposableSingletons*.*"
-    // NOTE: classic ButterKnife pattern left out; if you need it, escape $ like: "**/*\\$ViewInjector*.*"
 )
 
 tasks.register<JacocoReport>("jacocoTestReport") {
     dependsOn("testDebugUnitTest")
-
     reports {
         xml.required.set(true)
         html.required.set(true)
         csv.required.set(false)
     }
-
-    val javaDebug = fileTree("${buildDir}/intermediates/javac/debug/classes") {
-        exclude(excludedClasses)
-    }
-    val kotlinDebug = fileTree("${buildDir}/tmp/kotlin-classes/debug") {
-        exclude(excludedClasses)
-    }
-
+    val javaDebug = fileTree("${buildDir}/intermediates/javac/debug/classes") { exclude(excludedClasses) }
+    val kotlinDebug = fileTree("${buildDir}/tmp/kotlin-classes/debug") { exclude(excludedClasses) }
     classDirectories.setFrom(files(javaDebug, kotlinDebug))
     sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
     executionData.setFrom(
@@ -169,34 +176,17 @@ tasks.register<JacocoReport>("jacocoTestReport") {
 /* ---------- SonarQube configuration ---------- */
 sonarqube {
     properties {
-        // SonarCloud identifiers
         property("sonar.organization", "ciscode")
         property("sonar.projectKey", "CISCODEAPPS_pkg-android-auth")
         property("sonar.projectName", "pkg-android-auth")
         property("sonar.projectVersion", version.toString())
         property("sonar.host.url", "https://sonarcloud.io")
-
-        // Sources / tests
         property("sonar.sources", "src/main/java")
-        property("sonar.tests", "src/test/java") // removed src/test/kotlin (it doesn't exist)
-
-        // Exclusions
+        property("sonar.tests", "src/test/java")
         property("sonar.exclusions", "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*")
-
-        // Binaries (Debug)
-        property(
-            "sonar.java.binaries",
-            "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug"
-        )
-
-        // Test & Lint reports
+        property("sonar.java.binaries", "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug")
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
         property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
-
-        // Jacoco XML report
-        property(
-            "sonar.coverage.jacoco.xmlReportPaths",
-            "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
-        )
+        property("sonar.coverage.jacoco.xmlReportPaths", "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
     }
 }
