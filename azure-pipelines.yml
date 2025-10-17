@@ -36,7 +36,7 @@ steps:
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
     displayName: Ensure Android SDK 35 is installed
 
-  # ---- SONARCLOUD: PREPARE ----
+  # ---- SonarCloud ----
   - task: SonarCloudPrepare@1
     displayName: Prepare SonarCloud analysis
     inputs:
@@ -46,7 +46,6 @@ steps:
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # ---- TESTS + COVERAGE ----
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
@@ -61,53 +60,29 @@ steps:
   - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
 
-  # ---- VERIFY CENTRAL PORTAL TOKEN (tolerate 5xx, fail on 401) ----
+  # ---- Optional: quick check of Central API; tolerate 5xx ----
   - bash: |
       set -euo pipefail
       echo "Checking Central Publisher API with provided credentials..."
-      echo "LEN USER=$(printf %s "$CENTRAL_USERNAME" | wc -c)  LEN PASS=$(printf %s "$CENTRAL_PASSWORD" | wc -c)"
-
-      tries=0
-      max=3
-      rc=0
-      while (( tries < max )); do
-        tries=$((tries+1))
-        echo "Attempt $tries/$max..."
-        BODY_FILE="$(mktemp)"
-        CODE=$(curl -sS -o "$BODY_FILE" -w "%{http_code}" -u "$CENTRAL_USERNAME:$CENTRAL_PASSWORD" \
-          https://central.sonatype.com/api/v1/publisher/status || true)
-
-        echo "HTTP=$CODE"
-        if [[ "$CODE" == "200" ]]; then
-          echo "Central Publisher API reachable and credentials accepted."
-          rm -f "$BODY_FILE"
-          exit 0
-        fi
-
-        echo "Response body:"
-        sed -e 's/.*/  &/' "$BODY_FILE" || true
-        rm -f "$BODY_FILE"
-
-        # Hard fail on confirmed bad creds
-        if [[ "$CODE" == "401" ]]; then
-          echo "Invalid token (401). Check CENTRAL_USERNAME/CENTRAL_PASSWORD from Central Portal (Settings → User Tokens)."
-          exit 1
-        fi
-
-        # Retry on anything else (network hiccup / 5xx)
-        sleep 3
-      done
-
-      echo "Central Publisher status kept failing (e.g., 5xx). Proceeding so nmcp can attempt real upload."
+      CODE=$(curl -sS -o /dev/null -w "%{http_code}" -u "$(CENTRAL_USERNAME):$(CENTRAL_PASSWORD)" \
+        https://central.sonatype.com/api/v1/publisher/status || true)
+      echo "Publisher status HTTP=$CODE"
+      if [[ "$CODE" == "401" ]]; then
+        echo "Invalid Central token (401)."
+        exit 1
+      fi
       exit 0
-    displayName: Verify Central Portal token (resilient)
+    displayName: Verify Central Portal token
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
 
-  # ---- PUBLISH TO MAVEN CENTRAL (Central Portal via nmcp) ----
+  # ---- Publish to Central Portal via nmcp (requires signatures) ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
+      # ASCII-armored PRIVATE key; e.g., the output of `gpg --export-secret-keys --armor KEYID`
+      SIGNING_KEY: $(SIGNING_KEY)
+      SIGNING_PASSWORD: $(SIGNING_PASSWORD)
