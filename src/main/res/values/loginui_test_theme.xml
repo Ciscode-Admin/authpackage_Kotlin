@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="LoginUiTestTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="lu_colorLink">#1D4ED8</item>
+        <item name="lu_colorLoginButton">#111827</item>
+        <item name="lu_colorGoogleButton">#DB4437</item>
+        <item name="lu_colorFacebookButton">#1877F2</item>
+        <item name="lu_colorMicrosoftButton">#5E5E5E</item>
+    </style>
+</resources>
