@@ -2,11 +2,10 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     id("maven-publish")
+    id("signing")
+    id("com.gradleup.nmcp") version "0.17.4"
     id("org.sonarqube") version "5.1.0.4882"
     jacoco
-
-    // <-- nmcp AGGREGATION plugin (root). Publishes all maven-publish publications to Central Portal.
-    id("com.gradleup.nmcp.aggregation") version "1.2.0"
 }
 
 android {
@@ -27,7 +26,7 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug { }
+        debug { /* keep for sonar */ }
     }
 
     compileOptions {
@@ -37,7 +36,9 @@ android {
     kotlinOptions { jvmTarget = "11" }
 
     publishing {
-        singleVariant("release") { withSourcesJar() }
+        singleVariant("release") {
+            withSourcesJar()
+        }
     }
 
     testOptions {
@@ -53,44 +54,44 @@ android {
 group = "io.github.ciscode-ma"
 version = "0.1.2"
 
-// ---- Central Portal (nmcp) configuration ----
-// Reads CENTRAL_USERNAME / CENTRAL_PASSWORD from the environment (set in the pipeline).
-nmcpAggregation {
-    centralPortal {
-        username = System.getenv("CENTRAL_USERNAME") ?: ""
-        password = System.getenv("CENTRAL_PASSWORD") ?: ""
-        // Let the portal do the final "Publish" step automatically.
-        publishingType = "AUTOMATIC"
-        // You can use "USER_MANAGED" if you prefer to click Publish in the UI.
-        // publishingType = "USER_MANAGED"
-    }
-    // Single-module project: just publish every publication found
-    publishAllProjectsProbablyBreakingProjectIsolation()
-}
-
+/* ---------- Publishing (Central Portal via nmcp) ---------- */
 publishing {
-    // NOTE: With nmcp you do NOT configure a Maven repository URL here.
-    // nmcp will package your publications and upload them to Central Portal.
+    repositories {
+        // nmcp consumes this repo name automatically (no need for legacy s01)
+        maven {
+            name = "nmcp"
+            url = uri("https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC")
+            credentials {
+                username = System.getenv("CENTRAL_USERNAME")
+                password = System.getenv("CENTRAL_PASSWORD")
+            }
+        }
+    }
     publications {
         create<MavenPublication>("authuiRelease") {
             groupId = "io.github.ciscode-ma"
             artifactId = "authui"
             version = "0.1.2"
+
+            // Include the Android AAR + metadata from the release variant
             afterEvaluate { from(components["release"]) }
+
             pom {
                 name.set("authui")
                 description.set("Android authentication UI library")
+                url.set("https://github.com/CISCODEAPPS/pkg-android-auth") // <-- REQUIRED by Central
+
                 licenses {
                     license {
                         name.set("The Apache License, Version 2.0")
-                        url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
                         distribution.set("repo")
                     }
                 }
                 scm {
                     url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
-                    connection.set("scm:git:git://github.com/CISCODEAPPS/pkg-android-auth.git")
-                    developerConnection.set("scm:git:ssh://github.com:CISCODEAPPS/pkg-android-auth.git")
+                    connection.set("scm:git:https://github.com/CISCODEAPPS/pkg-android-auth.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/CISCODEAPPS/pkg-android-auth.git")
                 }
                 developers {
                     developer {
@@ -103,6 +104,20 @@ publishing {
     }
 }
 
+/* ---------- Sign everything in the publication (POM, module, AAR, sources) ---------- */
+val signingKey: String? = System.getenv("SIGNING_KEY")
+val signingPassword: String? = System.getenv("SIGNING_PASSWORD")
+
+signing {
+    if (!signingKey.isNullOrBlank()) {
+        useInMemoryPgpKeys(signingKey, signingPassword)
+        sign(publishing.publications)
+    } else {
+        logger.warn("SIGNING_KEY not provided. Central Portal will reject unsigned artifacts.")
+    }
+}
+
+/* ---------- Dependencies ---------- */
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
@@ -131,7 +146,7 @@ dependencies {
     testImplementation("androidx.test.ext:junit:1.2.1")
 }
 
-/* ---------- JaCoCo coverage for unit tests ---------- */
+/* ---------- JaCoCo ---------- */
 jacoco { toolVersion = "0.8.12" }
 
 val excludedClasses = listOf(
@@ -145,8 +160,11 @@ val excludedClasses = listOf(
 
 tasks.register<JacocoReport>("jacocoTestReport") {
     dependsOn("testDebugUnitTest")
-    reports { xml.required.set(true); html.required.set(true); csv.required.set(false) }
-
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
     val javaDebug = fileTree("${buildDir}/intermediates/javac/debug/classes") { exclude(excludedClasses) }
     val kotlinDebug = fileTree("${buildDir}/tmp/kotlin-classes/debug") { exclude(excludedClasses) }
 
@@ -164,7 +182,7 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     )
 }
 
-/* ---------- SonarQube configuration ---------- */
+/* ---------- SonarQube ---------- */
 sonarqube {
     properties {
         property("sonar.organization", "ciscode")
