@@ -103,6 +103,13 @@ steps:
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
+  - bash: |
+      set -e
+      RESP=$(curl -s -o /dev/null -w "%{http_code}" -u "$(SONATYPE_USERNAME):$(SONATYPE_PASSWORD)" \
+        https://s01.oss.sonatype.org/service/local/staging/profiles)
+      echo "HTTP=$RESP"
+    displayName: Verify Sonatype token (curl)
+
   # ---- PUBLISH TO MAVEN CENTRAL (Sonatype) ----
   - bash: ./gradlew publishAuthuiReleasePublicationToSonatypeRepository --stacktrace --no-daemon
     displayName: Publish authui (release) to Maven Central (Sonatype)
