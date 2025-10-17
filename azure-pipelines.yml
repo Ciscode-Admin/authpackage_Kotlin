@@ -8,9 +8,11 @@ variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 steps:
+  # Full clone so Gradle can read tags if needed
   - checkout: self
     fetchDepth: 0
 
+  # Use JDK 21 (works with Gradle 8.x / AGP 8.x)
   - task: JavaToolInstaller@0
     inputs:
       versionSpec: '21'
@@ -18,9 +20,11 @@ steps:
       jdkSourceOption: 'PreInstalled'
     displayName: Use Java 21
 
+  # Make wrapper executable
   - script: chmod +x ./gradlew
     displayName: Make gradlew executable
 
+  # Cache Gradle artifacts
   - task: Cache@2
     displayName: Cache Gradle
     inputs:
@@ -29,6 +33,7 @@ steps:
         gradle | "$(Agent.OS)"
       path: '$(HOME)/.gradle/caches'
 
+  # Ensure Android SDK 35 is available
   - bash: |
       set -e
       yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
@@ -40,37 +45,48 @@ steps:
   - task: SonarCloudPrepare@1
     displayName: Prepare SonarCloud analysis
     inputs:
-      SonarCloud: 'Sonarqube Cloud'
+      SonarCloud: 'Sonarqube Cloud'   # service connection name
       organization: 'ciscode'
-      scannerMode: 'Other'
+      scannerMode: 'Other'            # we run Gradle's 'sonarqube' task
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # ---- TESTS + COVERAGE ----
+  # ---- RUN UNIT TESTS + COVERAGE ----
+  # Allow the job to continue so the reports can be published.
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
-  # ---- SONARCLOUD: RUN ANALYSIS ----
+  # ---- SONARCLOUD: RUN ANALYSIS VIA GRADLE ----
   - bash: ./gradlew sonarqube --stacktrace --no-daemon
     displayName: Run SonarCloud analysis (Gradle)
 
+  # ---- SONARCLOUD: PUBLISH QUALITY GATE ----
   - task: SonarCloudPublish@1
     displayName: Publish SonarCloud Quality Gate
     inputs:
       pollingTimeoutSec: '300'
 
-  # Build the AAR
-  - bash: ./gradlew :assembleRelease
+  # Build the release AAR
+  - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
 
-  # ---- PUBLISH TO MAVEN CENTRAL (Central Portal) ----
-  # nmcp will package your publication(s) and upload them to Central Portal.
+  # ---- VERIFY CENTRAL PORTAL USER TOKEN (REQUIRED FOR nmcp) ----
+  - bash: |
+      set -euo pipefail
+      echo "Checking Central Publisher API with provided credentials..."
+      echo "LEN USER=$(printf %s "$CENTRAL_USERNAME" | wc -c)  LEN PASS=$(printf %s "$CENTRAL_PASSWORD" | wc -c)"
+      CODE=$(curl -sS -o /dev/null -w "%{http_code}" -u "$CENTRAL_USERNAME:$CENTRAL_PASSWORD" \
+        https://central.sonatype.com/api/v1/publisher/status)
+      echo "Publisher status HTTP=$CODE"
+      test "$CODE" = "200"
+    displayName: Verify Central Portal token
+    env:
+      CENTRAL_USERNAME: $(CENTRAL_USERNAME)
+      CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
+
+  # ---- PUBLISH TO MAVEN CENTRAL (Central Portal via nmcp) ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
-      CENTRAL_USERNAME: $(CENTRAL_USERNAME)   # set these two secrets in your pipeline variables
+      CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
-
-  # Optional: note afterwards
-  - bash: echo "Uploaded to Central Portal."
-    displayName: Done
