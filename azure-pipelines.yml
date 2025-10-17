@@ -8,11 +8,9 @@ variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 steps:
-  # Full clone so Gradle can read tags if needed
   - checkout: self
     fetchDepth: 0
 
-  # Use JDK 21 (works with Gradle 8.x / AGP 8.x)
   - task: JavaToolInstaller@0
     inputs:
       versionSpec: '21'
@@ -20,11 +18,9 @@ steps:
       jdkSourceOption: 'PreInstalled'
     displayName: Use Java 21
 
-  # Make wrapper executable
   - script: chmod +x ./gradlew
     displayName: Make gradlew executable
 
-  # Cache Gradle artifacts
   - task: Cache@2
     displayName: Cache Gradle
     inputs:
@@ -33,7 +29,6 @@ steps:
         gradle | "$(Agent.OS)"
       path: '$(HOME)/.gradle/caches'
 
-  # Ensure Android SDK 35 is available
   - bash: |
       set -e
       yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
@@ -41,116 +36,54 @@ steps:
         "platforms;android-35" "build-tools;35.0.0" "platform-tools"
     displayName: Ensure Android SDK 35 is installed
 
-  # ---- SONARCLOUD: PREPARE ----
+  # --- Tests, coverage, sonar (optional; keep as you had) ---
   - task: SonarCloudPrepare@1
     displayName: Prepare SonarCloud analysis
     inputs:
-      SonarCloud: 'Sonarqube Cloud'   # service connection name
+      SonarCloud: 'Sonarqube Cloud'
       organization: 'ciscode'
-      scannerMode: 'Other'            # we run Gradle's 'sonarqube' task
+      scannerMode: 'Other'
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # ---- RUN UNIT TESTS + COVERAGE ----
-  # Allow the job to continue so the reports can be published.
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
-  # ---- SONARCLOUD: RUN ANALYSIS VIA GRADLE ----
   - bash: ./gradlew sonarqube --stacktrace --no-daemon
     displayName: Run SonarCloud analysis (Gradle)
 
-  # ---- SONARCLOUD: PUBLISH QUALITY GATE ----
   - task: SonarCloudPublish@1
     displayName: Publish SonarCloud Quality Gate
     inputs:
       pollingTimeoutSec: '300'
 
-  # Build the release AAR
-  - bash: ./gradlew :assembleRelease
+  # --- Build release AAR ---
+  - bash: ./gradlew :assembleRelease --stacktrace --no-daemon
     displayName: Build release AAR
 
-  # ---- OPTIONAL: CHECK IF VERSION ALREADY EXISTS IN YOUR AZURE FEED ----
-  # If you don't use Azure Artifacts for this library, you can remove this whole block
+  # --- Verify Central Portal credentials (new API, not Nexus) ---
   - bash: |
-      set -euo pipefail
+      set -e
+      echo "Checking credentials against Central Publisher API ..."
+      B64=$(printf '%s:%s' "${CENTRAL_USERNAME}" "${CENTRAL_PASSWORD}" | base64 -w0)
+      CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+        -H "Authorization: Bearer ${B64}" \
+        https://central.sonatype.com/api/v1/publisher/status)
+      echo "HTTP=${CODE}"
+      test "$CODE" = "200"
+    displayName: Verify Central credentials (Publisher API)
 
-      GROUP=$(grep -Po '^group\s*=\s*"\K[^"]+' build.gradle.kts)
-      VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' build.gradle.kts)
-      ARTIFACT=$(grep -Po 'artifactId\s*=\s*"\K[^"]+' build.gradle.kts | head -n1)
-
-      if [ -z "${GROUP:-}" ] || [ -z "${VERSION:-}" ] || [ -z "${ARTIFACT:-}" ]; then
-        echo "Failed to parse GROUP/ARTIFACT/VERSION from build.gradle.kts"
-        echo "GROUP='${GROUP:-}', ARTIFACT='${ARTIFACT:-}', VERSION='${VERSION:-}'"
-        exit 1
-      fi
-
-      GROUP_PATH=${GROUP//./\/}
-      URL="https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1/${GROUP_PATH}/${ARTIFACT}/${VERSION}/${ARTIFACT}-${VERSION}.aar"
-
-      echo "Checking if artifact exists: ${URL}"
-      STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I -u "azdo:${AZURE_ARTIFACTS_TOKEN}" "${URL}")
-      echo "HEAD status: ${STATUS}"
-
-      if [ "${STATUS}" = "200" ] ; then
-        echo "Artifact already exists in feed. Skipping publish."
-        echo "##vso[task.setvariable variable=PUBLISH_NEEDED]false"
-      else
-        echo "Artifact not found in feed. Will publish."
-        echo "##vso[task.setvariable variable=PUBLISH_NEEDED]true"
-      fi
-    displayName: Check if version exists in feed
+  # --- Publish to Central Portal using nmcp plugin ---
+  - bash: >
+      ./gradlew publishAllPublicationsToCentralPortal
+      -PcentralPortalUsername="$(CENTRAL_USERNAME)"
+      -PcentralPortalPassword="$(CENTRAL_PASSWORD)"
+      --stacktrace --no-daemon
+    displayName: Publish to Maven Central (Central Portal)
     env:
-      AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
-
-  # ---- VERIFY SONATYPE TOKEN (HARDENED) ----
-  - bash: |
-      set -euo pipefail
-
-      u_raw="${SONATYPE_USERNAME:-}"
-      p_raw="${SONATYPE_PASSWORD:-}"
-      u="$(printf '%s' "$u_raw" | tr -d '\r\n')"
-      p="$(printf '%s' "$p_raw" | tr -d '\r\n')"
-
-      if [ -z "$u" ] || [ -z "$p" ]; then
-        echo "Sonatype credentials missing. Check pipeline secrets SONATYPE_USERNAME / SONATYPE_PASSWORD."
-        exit 1
-      fi
-
-      # Build Basic auth header safely (single-line base64)
-      auth="$(printf '%s' "$u:$p" | base64 -w0 2>/dev/null || printf '%s' "$u:$p" | base64)"
-
-      echo "Checking credentials against s01.oss.sonatype.org ..."
-      code="$(curl -sS -o /dev/null -w '%{http_code}' \
-        -H "Authorization: Basic $auth" \
-        https://s01.oss.sonatype.org/service/local/staging/profiles)"
-
-      echo "HTTP=$code"
-      if [ "$code" != "200" ]; then
-        echo "Failed auth. Common causes:"
-        echo "  1) Not using the *User Token* pair from Sonatype (Profile > User Token)"
-        echo "  2) Token copied with an extra space/newline"
-        echo "  3) Wrong host (must be s01.oss.sonatype.org)"
-        exit 1
-      fi
-
-      echo "Credentials OK."
-    displayName: Verify Sonatype token (curl)
-    env:
-      SONATYPE_USERNAME: $(SONATYPE_USERNAME)
-      SONATYPE_PASSWORD: $(SONATYPE_PASSWORD)
-
-  # ---- PUBLISH TO MAVEN CENTRAL (Sonatype) ----
-  - bash: ./gradlew publishAuthuiReleasePublicationToSonatypeRepository --stacktrace --no-daemon
-    displayName: Publish authui (release) to Maven Central (Sonatype)
-    condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'true'))
-    env:
-      SONATYPE_USERNAME: $(SONATYPE_USERNAME)
-      SONATYPE_PASSWORD: $(SONATYPE_PASSWORD)
-      ORG_GRADLE_PROJECT_signingKey: $(SIGNING_KEY)
-      ORG_GRADLE_PROJECT_signingPassword: $(SIGNING_PASSWORD)
-
-  # Friendly message when publish is skipped
-  - bash: echo "Publish skipped (same version already present)."
-    displayName: Skip note
-    condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'false'))
+      # From Central Portal -> User Token
+      CENTRAL_USERNAME: $(CENTRAL_USERNAME)
+      CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
+      # GPG signing (ASCII-armored private key and its passphrase)
+      SIGNING_KEY: $(SIGNING_KEY)
+      SIGNING_PASSWORD: $(SIGNING_PASSWORD)
