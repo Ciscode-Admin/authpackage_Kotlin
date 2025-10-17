@@ -1,8 +1,11 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+
     id("maven-publish")
     id("signing")
+    // Gradle -> Sonatype Central Portal publisher
+    id("io.github.gradleup.nmcp") version "0.17.4"
     id("org.sonarqube") version "5.1.0.4882"
     jacoco
 }
@@ -25,7 +28,7 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug { }
+        debug { /* keep for tests/sonar */ }
     }
 
     compileOptions {
@@ -35,7 +38,9 @@ android {
     kotlinOptions { jvmTarget = "11" }
 
     publishing {
-        singleVariant("release") { withSourcesJar() }
+        singleVariant("release") {
+            withSourcesJar()
+        }
     }
 
     testOptions {
@@ -48,24 +53,12 @@ android {
     }
 }
 
+/** Coordinates **/
 group = "io.github.ciscode-ma"
 version = "0.1.2"
 
+/** Publications **/
 publishing {
-    repositories {
-        // Sonatype (OSSRH) - s01 host
-        maven {
-            name = "sonatype"
-            url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            // Ensure we always use HTTPS
-            isAllowInsecureProtocol = false
-            credentials {
-                // These MUST be the User Token username/password from Sonatype profile
-                username = System.getenv("SONATYPE_USERNAME")
-                password = System.getenv("SONATYPE_PASSWORD")
-            }
-        }
-    }
     publications {
         create<MavenPublication>("authuiRelease") {
             groupId = "io.github.ciscode-ma"
@@ -79,15 +72,14 @@ publishing {
                 url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
                 licenses {
                     license {
-                        name.set("The Apache License, Version 2.0")
-                        url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
-                        distribution.set("repo")
+                        name.set("Apache-2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0")
                     }
                 }
                 scm {
                     url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
                     connection.set("scm:git:https://github.com/CISCODEAPPS/pkg-android-auth.git")
-                    developerConnection.set("scm:git:https://github.com/CISCODEAPPS/pkg-android-auth.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/CISCODEAPPS/pkg-android-auth.git")
                 }
                 developers {
                     developer {
@@ -100,15 +92,23 @@ publishing {
     }
 }
 
-// Sign the Maven publication (required by Maven Central)
+/** Sign with in-memory PGP (required by Central) **/
 signing {
-    val signingKey = System.getenv("SIGNING_KEY")
-    val signingPass = System.getenv("SIGNING_PASSWORD")
-    if (!signingKey.isNullOrBlank() && !signingPass.isNullOrBlank()) {
-        useInMemoryPgpKeys(signingKey, signingPass)
-        sign(publishing.publications["authuiRelease"])
+    val key = System.getenv("SIGNING_KEY")
+    val pass = System.getenv("SIGNING_PASSWORD")
+    if (!key.isNullOrBlank() && !pass.isNullOrBlank()) {
+        useInMemoryPgpKeys(key, pass)
+        sign(publishing.publications)
     }
 }
+
+/** nmcp -> publish all created publications to Central Portal */
+nmcp {
+    // this registers the tasks that call Central’s Publisher API
+    publishAllPublicationsToCentralPortal()
+}
+
+/* ----------------- deps, tests, sonar, jacoco (unchanged) ----------------- */
 
 dependencies {
     implementation(libs.androidx.core.ktx)
@@ -129,7 +129,6 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("com.squareup.okhttp3:okhttp-urlconnection:4.12.0")
 
-    // Unit test deps
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("org.mockito:mockito-core:5.19.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:6.0.0")
@@ -138,42 +137,32 @@ dependencies {
     testImplementation("androidx.test.ext:junit:1.2.1")
 }
 
-/* ---------- JaCoCo coverage for unit tests ---------- */
 jacoco { toolVersion = "0.8.12" }
 
 val excludedClasses = listOf(
     "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
     "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*",
-    "**/*_Factory*.*", "**/*_Provide*Factory*.*",
-    "**/*Companion*.*", "**/*Module*.*",
-    "**/*Binding.*", "**/*BindingImpl.*",
-    "**/*ComposableSingletons*.*"
+    "**/*_Factory*.*", "**/*_Provide*Factory*.*", "**/*Companion*.*",
+    "**/*Module*.*", "**/*Binding.*", "**/*BindingImpl.*", "**/*ComposableSingletons*.*"
 )
 
 tasks.register<JacocoReport>("jacocoTestReport") {
     dependsOn("testDebugUnitTest")
-    reports {
-        xml.required.set(true)
-        html.required.set(true)
-        csv.required.set(false)
-    }
+    reports { xml.required.set(true); html.required.set(true); csv.required.set(false) }
+
     val javaDebug = fileTree("${buildDir}/intermediates/javac/debug/classes") { exclude(excludedClasses) }
     val kotlinDebug = fileTree("${buildDir}/tmp/kotlin-classes/debug") { exclude(excludedClasses) }
     classDirectories.setFrom(files(javaDebug, kotlinDebug))
     sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
-    executionData.setFrom(
-        fileTree(buildDir) {
-            include(
-                "jacoco/testDebugUnitTest.exec",
-                "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec",
-                "**/jacoco/*.exec",
-                "**/*.ec"
-            )
-        }
-    )
+    executionData.setFrom(fileTree(buildDir) {
+        include(
+            "jacoco/testDebugUnitTest.exec",
+            "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec",
+            "**/jacoco/*.exec", "**/*.ec"
+        )
+    })
 }
 
-/* ---------- SonarQube configuration ---------- */
 sonarqube {
     properties {
         property("sonar.organization", "ciscode")
