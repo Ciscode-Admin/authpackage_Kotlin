@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<MotionScene xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:motion="http://schemas.android.com/apk/res-auto">
+
+    <Transition
+        motion:constraintSetStart="@id/start"
+        motion:constraintSetEnd="@id/end"
+        motion:duration="500" />
+
+    <!-- VIEW MODE -->
+    <ConstraintSet android:id="@+id/start">
+
+        <Constraint android:id="@id/colorExpander">
+            <Layout
+                android:layout_width="0dp"
+                android:layout_height="220dp"
+                motion:layout_constraintTop_toTopOf="parent"
+                motion:layout_constraintStart_toStartOf="parent"
+                motion:layout_constraintEnd_toEndOf="parent"/>
+        </Constraint>
+
+        <Constraint android:id="@id/btnEditIcon">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
+
+        <Constraint android:id="@id/btnSaveFab">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
+
+        <Constraint android:id="@id/btnLogout">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
+    </ConstraintSet>
+
+    <!-- EDIT MODE -->
+    <ConstraintSet android:id="@+id/end">
+
+        <Constraint android:id="@id/colorExpander" motion:visibilityMode="ignore">
+            <Layout
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                motion:layout_constraintTop_toTopOf="parent"
+                motion:layout_constraintBottom_toBottomOf="parent"
+                motion:layout_constraintStart_toStartOf="parent"
+                motion:layout_constraintEnd_toEndOf="parent"/>
+        </Constraint>
+
+        <Constraint android:id="@id/btnEditIcon">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
+
+        <Constraint android:id="@id/btnSaveFab">
+            <PropertySet android:visibility="visible"/>
+        </Constraint>
+
+        <Constraint android:id="@id/btnLogout">
+            <PropertySet android:visibility="gone"/>
+        </Constraint>
+    </ConstraintSet>
+</MotionScene>

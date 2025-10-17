@@ -102,6 +102,7 @@ class LoginFragment : Fragment() {
                                         putString(ACTION, ACTION_LOGIN_SUCCESS)
                                         putString(ACCESS_TOKEN, body.accessToken)
                                         putString(REFRESH_TOKEN, body.refreshToken)
+                                        putString(EMAIL, email)
                                     }
                                 )
                             } else {

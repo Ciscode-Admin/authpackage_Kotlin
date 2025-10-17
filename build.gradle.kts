@@ -55,7 +55,7 @@ android {
 }
 
 group = "com.ciscod.android"
-version = "0.1.0"
+version = "0.1.2"
 
 publishing {
     repositories {
@@ -72,7 +72,7 @@ publishing {
         create<MavenPublication>("authuiRelease") {
             groupId = "com.ciscod.android"
             artifactId = "authui"
-            version = "0.1.0"
+            version = "0.1.2"
             afterEvaluate { from(components["release"]) }
             pom {
                 name.set("authui")
@@ -89,7 +89,6 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-moshi:2.9.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.9.0")
@@ -98,7 +97,8 @@ dependencies {
         exclude(group = "com.microsoft.device.display", module = "display-mask")
     }
     implementation("androidx.browser:browser:1.7.0")
-
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("com.squareup.okhttp3:okhttp-urlconnection:4.12.0")
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("org.mockito:mockito-core:5.19.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:6.0.0")

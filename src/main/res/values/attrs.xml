@@ -5,4 +5,8 @@
     <attr name="lu_colorFacebookButton" format="color"/>
     <attr name="lu_colorMicrosoftButton" format="color"/>
     <attr name="lu_colorLink" format="color"/>
+    <attr name="lu_profileHeaderColor" format="color" />
+    <attr name="lu_profileCardColor" format="color" />
+    <attr name="lu_profilePrimaryTextColor" format="color" />
+    <attr name="lu_profileButtonColor" format="color" />
 </resources>
