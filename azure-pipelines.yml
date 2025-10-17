@@ -103,13 +103,14 @@ steps:
     env:
       AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
 
-  # Publish to Azure Artifacts ONLY if not already present
-  - bash: ./gradlew publishAuthuiReleasePublicationToAzureArtifactsRepository --stacktrace --no-daemon
-    displayName: Publish authui (release) to android-packages
-    condition: and(succeeded(), eq(variables.PUBLISH_NEEDED, 'true'))
+  # ---- PUBLISH TO MAVEN CENTRAL (Sonatype) ----
+  - bash: ./gradlew publishAuthuiReleasePublicationToSonatypeRepository --stacktrace --no-daemon
+    displayName: Publish authui (release) to Maven Central (Sonatype)
     env:
-      AZURE_ARTIFACTS_USERNAME: 'azdo'
-      AZURE_ARTIFACTS_TOKEN: $(System.AccessToken)
+      SONATYPE_USERNAME: $(SONATYPE_USERNAME)
+      SONATYPE_PASSWORD: $(SONATYPE_PASSWORD)
+      ORG_GRADLE_PROJECT_signingKey: $(SIGNING_KEY)
+      ORG_GRADLE_PROJECT_signingPassword: $(SIGNING_PASSWORD)
 
   # Friendly message when publish is skipped
   - bash: echo "Publish skipped (same version already present)."
