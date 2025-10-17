@@ -1,11 +1,8 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
-
     id("maven-publish")
-    id("signing")
-    // Gradle -> Sonatype Central Portal publisher
-    id("io.github.gradleup.nmcp") version "0.17.4"
+    id("com.gradleup.nmcp") version "0.17.3"
     id("org.sonarqube") version "5.1.0.4882"
     jacoco
 }
@@ -28,7 +25,7 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug { /* keep for tests/sonar */ }
+        debug { /* keep for Sonar / tests */ }
     }
 
     compileOptions {
@@ -53,11 +50,17 @@ android {
     }
 }
 
-/** Coordinates **/
 group = "io.github.ciscode-ma"
 version = "0.1.2"
 
-/** Publications **/
+nmcp {
+    publishAllPublicationsToCentralPortal(
+        // read token from env at execution time
+        username = providers.environmentVariable("CENTRAL_TOKEN_ID"),
+        password = providers.environmentVariable("CENTRAL_TOKEN_SECRET")
+    )
+}
+
 publishing {
     publications {
         create<MavenPublication>("authuiRelease") {
@@ -73,13 +76,8 @@ publishing {
                 licenses {
                     license {
                         name.set("Apache-2.0")
-                        url.set("https://www.apache.org/licenses/LICENSE-2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
                     }
-                }
-                scm {
-                    url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
-                    connection.set("scm:git:https://github.com/CISCODEAPPS/pkg-android-auth.git")
-                    developerConnection.set("scm:git:ssh://git@github.com/CISCODEAPPS/pkg-android-auth.git")
                 }
                 developers {
                     developer {
@@ -87,33 +85,21 @@ publishing {
                         name.set("CISCODE")
                     }
                 }
+                scm {
+                    url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
+                    connection.set("scm:git:https://github.com/CISCODEAPPS/pkg-android-auth.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/CISCODEAPPS/pkg-android-auth.git")
+                }
             }
         }
     }
 }
 
-/** Sign with in-memory PGP (required by Central) **/
-signing {
-    val key = System.getenv("SIGNING_KEY")
-    val pass = System.getenv("SIGNING_PASSWORD")
-    if (!key.isNullOrBlank() && !pass.isNullOrBlank()) {
-        useInMemoryPgpKeys(key, pass)
-        sign(publishing.publications)
-    }
-}
-
-/** nmcp -> publish all created publications to Central Portal */
-nmcp {
-    // this registers the tasks that call Central’s Publisher API
-    publishAllPublicationsToCentralPortal()
-}
-
-/* ----------------- deps, tests, sonar, jacoco (unchanged) ----------------- */
-
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -129,6 +115,7 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("com.squareup.okhttp3:okhttp-urlconnection:4.12.0")
 
+    // Unit test deps
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("org.mockito:mockito-core:5.19.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:6.0.0")
@@ -137,13 +124,14 @@ dependencies {
     testImplementation("androidx.test.ext:junit:1.2.1")
 }
 
+/* ---------- JaCoCo coverage for unit tests ---------- */
 jacoco { toolVersion = "0.8.12" }
 
 val excludedClasses = listOf(
     "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
-    "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*",
-    "**/*_Factory*.*", "**/*_Provide*Factory*.*", "**/*Companion*.*",
-    "**/*Module*.*", "**/*Binding.*", "**/*BindingImpl.*", "**/*ComposableSingletons*.*"
+    "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*", "**/*_Factory*.*",
+    "**/*_Provide*Factory*.*", "**/*Companion*.*", "**/*Module*.*",
+    "**/*Binding.*", "**/*BindingImpl.*", "**/*ComposableSingletons*.*"
 )
 
 tasks.register<JacocoReport>("jacocoTestReport") {
@@ -152,17 +140,22 @@ tasks.register<JacocoReport>("jacocoTestReport") {
 
     val javaDebug = fileTree("${buildDir}/intermediates/javac/debug/classes") { exclude(excludedClasses) }
     val kotlinDebug = fileTree("${buildDir}/tmp/kotlin-classes/debug") { exclude(excludedClasses) }
+
     classDirectories.setFrom(files(javaDebug, kotlinDebug))
     sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
-    executionData.setFrom(fileTree(buildDir) {
-        include(
-            "jacoco/testDebugUnitTest.exec",
-            "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec",
-            "**/jacoco/*.exec", "**/*.ec"
-        )
-    })
+    executionData.setFrom(
+        fileTree(buildDir) {
+            include(
+                "jacoco/testDebugUnitTest.exec",
+                "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec",
+                "**/jacoco/*.exec",
+                "**/*.ec"
+            )
+        }
+    )
 }
 
+/* ---------- SonarQube (SonarCloud) ---------- */
 sonarqube {
     properties {
         property("sonar.organization", "ciscode")
@@ -173,9 +166,9 @@ sonarqube {
         property("sonar.sources", "src/main/java")
         property("sonar.tests", "src/test/java")
         property("sonar.exclusions", "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*")
-        property("sonar.java.binaries", "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug")
+        property("sonar.java.binaries","build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug")
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
         property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
-        property("sonar.coverage.jacoco.xmlReportPaths", "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
+        property("sonar.coverage.jacoco.xmlReportPaths","build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
     }
 }
