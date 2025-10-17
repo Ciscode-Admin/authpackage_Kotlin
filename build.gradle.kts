@@ -2,9 +2,11 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     id("maven-publish")
-    id("com.gradleup.nmcp") version "0.17.3"
     id("org.sonarqube") version "5.1.0.4882"
     jacoco
+
+    // <-- nmcp AGGREGATION plugin (root). Publishes all maven-publish publications to Central Portal.
+    id("com.gradleup.nmcp.aggregation") version "1.2.0"
 }
 
 android {
@@ -25,7 +27,7 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug { /* keep for Sonar / tests */ }
+        debug { }
     }
 
     compileOptions {
@@ -35,9 +37,7 @@ android {
     kotlinOptions { jvmTarget = "11" }
 
     publishing {
-        singleVariant("release") {
-            withSourcesJar()
-        }
+        singleVariant("release") { withSourcesJar() }
     }
 
     testOptions {
@@ -53,42 +53,50 @@ android {
 group = "io.github.ciscode-ma"
 version = "0.1.2"
 
-nmcp {
-    publishAllPublicationsToCentralPortal(
-        // read token from env at execution time
-        username = providers.environmentVariable("CENTRAL_TOKEN_ID"),
-        password = providers.environmentVariable("CENTRAL_TOKEN_SECRET")
-    )
+// ---- Central Portal (nmcp) configuration ----
+// Reads CENTRAL_USERNAME / CENTRAL_PASSWORD from the environment (set in the pipeline).
+nmcpAggregation {
+    centralPortal {
+        username = System.getenv("CENTRAL_USERNAME") ?: ""
+        password = System.getenv("CENTRAL_PASSWORD") ?: ""
+        // Let the portal do the final "Publish" step automatically.
+        publishingType = "AUTOMATIC"
+        // You can use "USER_MANAGED" if you prefer to click Publish in the UI.
+        // publishingType = "USER_MANAGED"
+    }
+    // Single-module project: just publish every publication found
+    publishAllProjectsProbablyBreakingProjectIsolation()
 }
 
 publishing {
+    // NOTE: With nmcp you do NOT configure a Maven repository URL here.
+    // nmcp will package your publications and upload them to Central Portal.
     publications {
         create<MavenPublication>("authuiRelease") {
             groupId = "io.github.ciscode-ma"
             artifactId = "authui"
             version = "0.1.2"
             afterEvaluate { from(components["release"]) }
-
             pom {
                 name.set("authui")
                 description.set("Android authentication UI library")
-                url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
                 licenses {
                     license {
-                        name.set("Apache-2.0")
-                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                        name.set("The Apache License, Version 2.0")
+                        url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+                        distribution.set("repo")
                     }
+                }
+                scm {
+                    url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
+                    connection.set("scm:git:git://github.com/CISCODEAPPS/pkg-android-auth.git")
+                    developerConnection.set("scm:git:ssh://github.com:CISCODEAPPS/pkg-android-auth.git")
                 }
                 developers {
                     developer {
                         id.set("ciscode")
                         name.set("CISCODE")
                     }
-                }
-                scm {
-                    url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
-                    connection.set("scm:git:https://github.com/CISCODEAPPS/pkg-android-auth.git")
-                    developerConnection.set("scm:git:ssh://git@github.com/CISCODEAPPS/pkg-android-auth.git")
                 }
             }
         }
@@ -99,7 +107,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
-
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -129,9 +136,11 @@ jacoco { toolVersion = "0.8.12" }
 
 val excludedClasses = listOf(
     "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
-    "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*", "**/*_Factory*.*",
-    "**/*_Provide*Factory*.*", "**/*Companion*.*", "**/*Module*.*",
-    "**/*Binding.*", "**/*BindingImpl.*", "**/*ComposableSingletons*.*"
+    "**/*Dagger*.*", "**/*Hilt*.*", "**/*_MembersInjector*.*",
+    "**/*_Factory*.*", "**/*_Provide*Factory*.*",
+    "**/*Companion*.*", "**/*Module*.*",
+    "**/*Binding.*", "**/*BindingImpl.*",
+    "**/*ComposableSingletons*.*"
 )
 
 tasks.register<JacocoReport>("jacocoTestReport") {
@@ -155,7 +164,7 @@ tasks.register<JacocoReport>("jacocoTestReport") {
     )
 }
 
-/* ---------- SonarQube (SonarCloud) ---------- */
+/* ---------- SonarQube configuration ---------- */
 sonarqube {
     properties {
         property("sonar.organization", "ciscode")
@@ -166,9 +175,9 @@ sonarqube {
         property("sonar.sources", "src/main/java")
         property("sonar.tests", "src/test/java")
         property("sonar.exclusions", "**/R.class, **/R$*.class, **/BuildConfig.*, **/Manifest*.*, **/*Test*.*")
-        property("sonar.java.binaries","build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug")
+        property("sonar.java.binaries", "build/intermediates/javac/debug/classes,build/tmp/kotlin-classes/debug")
         property("sonar.junit.reportPaths", "build/test-results/testDebugUnitTest")
         property("sonar.androidLint.reportPaths", "build/reports/lint-results-debug.xml")
-        property("sonar.coverage.jacoco.xmlReportPaths","build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
+        property("sonar.coverage.jacoco.xmlReportPaths", "build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml")
     }
 }
