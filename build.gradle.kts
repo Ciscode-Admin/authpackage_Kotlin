@@ -3,7 +3,6 @@ plugins {
     alias(libs.plugins.kotlin.android)
     id("maven-publish")
     id("signing")
-    id("com.gradleup.nmcp") version "0.17.4"
     id("org.sonarqube") version "5.1.0.4882"
     jacoco
 }
