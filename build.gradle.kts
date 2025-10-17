@@ -42,6 +42,7 @@ android {
             withSourcesJar()
         }
     }
+
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
@@ -54,29 +55,34 @@ android {
     }
 }
 
-group = "com.ciscod.android"
+group = "io.github.ciscode-ma"
 version = "0.1.2"
 
 publishing {
     repositories {
+        // Publish to Sonatype (Maven Central)
         maven {
-            name = "azureArtifacts"
-            url = uri("https://pkgs.dev.azure.com/CISCODEAPPS/_packaging/android-packages/maven/v1")
+            name = "sonatype"
+            url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
             credentials {
-                username = System.getenv("AZURE_ARTIFACTS_USERNAME") ?: "azdo"
-                password = System.getenv("AZURE_ARTIFACTS_TOKEN")
+                username = System.getenv("SONATYPE_USERNAME")
+                password = System.getenv("SONATYPE_PASSWORD")
             }
         }
     }
     publications {
         create<MavenPublication>("authuiRelease") {
-            groupId = "com.ciscod.android"
+            groupId = "io.github.ciscode-ma"
             artifactId = "authui"
             version = "0.1.2"
             afterEvaluate { from(components["release"]) }
             pom {
                 name.set("authui")
                 description.set("Android authentication UI library")
+                // (Optional) If you already had these in 0.1.1 via gradle.properties, you can omit here.
+                // licenses { license { name.set("The Apache License, Version 2.0"); url.set("http://www.apache.org/licenses/LICENSE-2.0.txt") } }
+                // scm { url.set("https://github.com/<your-org>/<your-repo>") }
+                // developers { developer { id.set("ciscode"); name.set("CISCODE") } }
             }
         }
     }
@@ -89,6 +95,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-moshi:2.9.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.9.0")
@@ -99,6 +106,8 @@ dependencies {
     implementation("androidx.browser:browser:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("com.squareup.okhttp3:okhttp-urlconnection:4.12.0")
+
+    // Unit test deps
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("org.mockito:mockito-core:5.19.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:6.0.0")
