@@ -8,11 +8,9 @@ variables:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 steps:
-  # Full clone so Gradle can read tags if needed
   - checkout: self
     fetchDepth: 0
 
-  # Use JDK 21 (works with Gradle 8.x / AGP 8.x)
   - task: JavaToolInstaller@0
     inputs:
       versionSpec: '21'
@@ -20,11 +18,9 @@ steps:
       jdkSourceOption: 'PreInstalled'
     displayName: Use Java 21
 
-  # Make wrapper executable
   - script: chmod +x ./gradlew
     displayName: Make gradlew executable
 
-  # Cache Gradle artifacts
   - task: Cache@2
     displayName: Cache Gradle
     inputs:
@@ -33,7 +29,6 @@ steps:
         gradle | "$(Agent.OS)"
       path: '$(HOME)/.gradle/caches'
 
-  # Ensure Android SDK 35 is available
   - bash: |
       set -e
       yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
@@ -45,41 +40,67 @@ steps:
   - task: SonarCloudPrepare@1
     displayName: Prepare SonarCloud analysis
     inputs:
-      SonarCloud: 'Sonarqube Cloud'   # service connection name
+      SonarCloud: 'Sonarqube Cloud'
       organization: 'ciscode'
-      scannerMode: 'Other'            # we run Gradle's 'sonarqube' task
+      scannerMode: 'Other'
       projectKey: 'CISCODEAPPS_pkg-android-auth'
       projectName: 'pkg-android-auth'
 
-  # ---- RUN UNIT TESTS + COVERAGE ----
-  # Allow the job to continue so the reports can be published.
+  # ---- TESTS + COVERAGE ----
   - bash: ./gradlew clean :testDebugUnitTest jacocoTestReport --stacktrace --info --no-daemon || true
     displayName: Run unit tests (debug) + coverage
 
-  # ---- SONARCLOUD: RUN ANALYSIS VIA GRADLE ----
   - bash: ./gradlew sonarqube --stacktrace --no-daemon
     displayName: Run SonarCloud analysis (Gradle)
 
-  # ---- SONARCLOUD: PUBLISH QUALITY GATE ----
   - task: SonarCloudPublish@1
     displayName: Publish SonarCloud Quality Gate
     inputs:
       pollingTimeoutSec: '300'
 
-  # Build the release AAR
   - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
 
-  # ---- VERIFY CENTRAL PORTAL USER TOKEN (REQUIRED FOR nmcp) ----
+  # ---- VERIFY CENTRAL PORTAL TOKEN (tolerate 5xx, fail on 401) ----
   - bash: |
       set -euo pipefail
       echo "Checking Central Publisher API with provided credentials..."
       echo "LEN USER=$(printf %s "$CENTRAL_USERNAME" | wc -c)  LEN PASS=$(printf %s "$CENTRAL_PASSWORD" | wc -c)"
-      CODE=$(curl -sS -o /dev/null -w "%{http_code}" -u "$CENTRAL_USERNAME:$CENTRAL_PASSWORD" \
-        https://central.sonatype.com/api/v1/publisher/status)
-      echo "Publisher status HTTP=$CODE"
-      test "$CODE" = "200"
-    displayName: Verify Central Portal token
+
+      tries=0
+      max=3
+      rc=0
+      while (( tries < max )); do
+        tries=$((tries+1))
+        echo "Attempt $tries/$max..."
+        BODY_FILE="$(mktemp)"
+        CODE=$(curl -sS -o "$BODY_FILE" -w "%{http_code}" -u "$CENTRAL_USERNAME:$CENTRAL_PASSWORD" \
+          https://central.sonatype.com/api/v1/publisher/status || true)
+
+        echo "HTTP=$CODE"
+        if [[ "$CODE" == "200" ]]; then
+          echo "Central Publisher API reachable and credentials accepted."
+          rm -f "$BODY_FILE"
+          exit 0
+        fi
+
+        echo "Response body:"
+        sed -e 's/.*/  &/' "$BODY_FILE" || true
+        rm -f "$BODY_FILE"
+
+        # Hard fail on confirmed bad creds
+        if [[ "$CODE" == "401" ]]; then
+          echo "Invalid token (401). Check CENTRAL_USERNAME/CENTRAL_PASSWORD from Central Portal (Settings → User Tokens)."
+          exit 1
+        fi
+
+        # Retry on anything else (network hiccup / 5xx)
+        sleep 3
+      done
+
+      echo "Central Publisher status kept failing (e.g., 5xx). Proceeding so nmcp can attempt real upload."
+      exit 0
+    displayName: Verify Central Portal token (resilient)
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
