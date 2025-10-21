@@ -77,63 +77,18 @@ steps:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
 
-  # ---- Diagnostic: validate SIGNING_KEY and show gpg error safely ----
-  - bash: |
-      set -euo pipefail
-      echo "Diagnostic: validating SIGNING_KEY format (no secrets will be printed)."
+  # ---- Download GPG private key from Azure Secure files ----
+  - task: DownloadSecureFile@1
+    name: gpgkey
+    displayName: Download signing key (Secure file)
+    inputs:
+      secureFile: 'ciscode_private.asc'   # <-- match the name you uploaded
 
-      echo "--- gpg version ---"
-      gpg --version || true
-
-      tmpdir="$(mktemp -d)"
-      raw="$tmpdir/key_raw.txt"
-      printf '%s' "$SIGNING_KEY" > "$raw"
-
-      fixed="$tmpdir/key_fixed.asc"
-      if grep -q '\\n' "$raw"; then
-        echo "Result: Found literal '\\n' characters -> converting to real newlines."
-        sed 's/\\r//g; s/\\n/\n/g' "$raw" > "$fixed"
-      else
-        tr -d '\r' < "$raw" > "$fixed"
-      fi
-
-      if head -1 "$fixed" | grep -q 'BEGIN PGP PRIVATE KEY BLOCK'; then
-        echo "Marker check (BEGIN): PASS"
-      else
-        echo "Marker check (BEGIN): FAIL"; exit 1
-      fi
-      if grep -q 'END PGP PRIVATE KEY BLOCK' "$fixed"; then
-        echo "Marker check (END): PASS"
-      else
-        echo "Marker check (END): FAIL"; exit 1
-      fi
-
-      echo "--- gpg import test (capturing stderr) ---"
-      GNUPGHOME="$tmpdir/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
-      set +e
-      gpg --batch --pinentry-mode loopback --passphrase "${SIGNING_PASSWORD:-}" --import "$fixed" 2> "$tmpdir/err.txt"
-      rc=$?
-      set -e
-      if [ $rc -eq 0 ]; then
-        echo "GPG import test: PASS"
-      else
-        echo "GPG import test: FAIL (exit $rc)"
-        echo "--- gpg stderr ---"
-        sed -e 's/\r$//' "$tmpdir/err.txt" | tail -n +1
-        exit 1
-      fi
-
-      echo "Diagnostic complete."
-    displayName: Diagnose SIGNING_KEY formatting (verbose)
-    env:
-      SIGNING_KEY: $(SIGNING_KEY)
-      SIGNING_PASSWORD: $(SIGNING_PASSWORD)
-
-  # ---- Publish to Maven Central via nmcp aggregation ----
+  # ---- Publish to Maven Central via nmcp aggregation (uses key file) ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
-      SIGNING_KEY: $(SIGNING_KEY)
+      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)
       SIGNING_PASSWORD: $(SIGNING_PASSWORD)
