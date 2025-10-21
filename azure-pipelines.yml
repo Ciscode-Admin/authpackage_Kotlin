@@ -82,13 +82,40 @@ steps:
     name: gpgkey
     displayName: Download signing key (Secure file)
     inputs:
-      secureFile: 'ciscode_private.asc'   # <-- match the name you uploaded
+      secureFile: 'ciscode_private.asc'   # must match the file name in Library → Secure files
 
-  # ---- Publish to Maven Central via nmcp aggregation (uses key file) ----
+  # ---- Validate the downloaded key (no secrets printed) ----
+  - bash: |
+      set -euo pipefail
+      echo "--- gpg version ---"
+      gpg --version || true
+
+      KEYFILE="$(gpgkey.secureFilePath)"
+      echo "Validating secure key file at: ${KEYFILE}"
+
+      # Basic header/footer sanity checks
+      head -n 1 "${KEYFILE}" | grep -q 'BEGIN PGP PRIVATE KEY BLOCK' || { echo "ERROR: Missing BEGIN marker"; exit 1; }
+      tail -n 1 "${KEYFILE}" | grep -q 'END PGP PRIVATE KEY BLOCK' || { echo "ERROR: Missing END marker"; exit 1; }
+
+      echo "--- gpg show-only import (should show 'sec'/'ssb') ---"
+      # This prints metadata only; it does NOT import into the agent keyring.
+      set +e
+      OUT=$(gpg --batch --import-options show-only --import "${KEYFILE}" 2>&1)
+      RC=$?
+      set -e
+      echo "$OUT"
+      echo "Exit code: $RC"
+
+      echo "$OUT" | grep -q '^sec' || { echo "ERROR: No 'sec' line found. This file is not a private key."; exit 1; }
+      echo "Key validation: PASS"
+    displayName: Validate signing key (show-only)
+
+  # ---- Publish to Maven Central via nmcp aggregation (force secure-file usage) ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
-      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)
-      SIGNING_PASSWORD: $(SIGNING_PASSWORD)
+      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)   # path to downloaded ASCII key (used by build.gradle.kts)
+      SIGNING_PASSWORD: $(SIGNING_PASSWORD)        # key passphrase
+      SIGNING_KEY: ''                              # explicitly unset in case a var group still defines it
