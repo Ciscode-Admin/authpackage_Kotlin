@@ -1,10 +1,26 @@
 plugins {
+    // nmcp aggregation plugin creates `publishAggregationToCentralPortal`
+    id("com.gradleup.nmcp.aggregation") version "1.2.0"
+
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     id("maven-publish")
     id("signing")
     id("org.sonarqube") version "5.1.0.4882"
     jacoco
+}
+
+/* ---------- nmcp Aggregation (Central Portal) ---------- */
+nmcpAggregation {
+    centralPortal {
+        // Read Central Portal credentials from CI env
+        username = System.getenv("CENTRAL_USERNAME")
+        password = System.getenv("CENTRAL_PASSWORD")
+        // Auto-publish once validation passes
+        publishingType = "AUTOMATIC"
+    }
+    // Collect publications from this project (and subprojects if any)
+    publishAllProjectsProbablyBreakingProjectIsolation()
 }
 
 android {
@@ -53,8 +69,9 @@ android {
 group = "io.github.ciscode-ma"
 version = "0.1.2"
 
-/* ---------- Publications (consumed by nmcp aggregation at root) ---------- */
+/* ---------- Publications (consumed by nmcp aggregation) ---------- */
 publishing {
+    // NOTE: no repository block here; nmcp aggregation handles upload to Central
     publications {
         create<MavenPublication>("authuiRelease") {
             groupId = "io.github.ciscode-ma"
