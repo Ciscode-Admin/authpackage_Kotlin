@@ -60,7 +60,7 @@ steps:
   - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
 
-  # ---- Optional: quick check of Central API; tolerate 5xx ----
+  # ---- Optional: verify Central Portal credentials ----
   - bash: |
       set -euo pipefail
       echo "Checking Central Publisher API with provided credentials..."
@@ -77,12 +77,11 @@ steps:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
 
-  # ---- Publish to Central Portal via nmcp (requires signatures) ----
+  # ---- Publish to Maven Central via nmcp aggregation ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
-      # ASCII-armored PRIVATE key; e.g., the output of `gpg --export-secret-keys --armor KEYID`
       SIGNING_KEY: $(SIGNING_KEY)
       SIGNING_PASSWORD: $(SIGNING_PASSWORD)
