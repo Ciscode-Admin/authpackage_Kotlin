@@ -53,19 +53,8 @@ android {
 group = "io.github.ciscode-ma"
 version = "0.1.2"
 
-/* ---------- Publishing (Central Portal via nmcp) ---------- */
+/* ---------- Publications (consumed by nmcp aggregation at root) ---------- */
 publishing {
-    repositories {
-        // nmcp consumes this repo name automatically (no need for legacy s01)
-        maven {
-            name = "nmcp"
-            url = uri("https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC")
-            credentials {
-                username = System.getenv("CENTRAL_USERNAME")
-                password = System.getenv("CENTRAL_PASSWORD")
-            }
-        }
-    }
     publications {
         create<MavenPublication>("authuiRelease") {
             groupId = "io.github.ciscode-ma"
@@ -78,7 +67,7 @@ publishing {
             pom {
                 name.set("authui")
                 description.set("Android authentication UI library")
-                url.set("https://github.com/CISCODEAPPS/pkg-android-auth") // <-- REQUIRED by Central
+                url.set("https://github.com/CISCODEAPPS/pkg-android-auth")
 
                 licenses {
                     license {
