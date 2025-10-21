@@ -1,5 +1,9 @@
+import java.io.File
+import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
+import org.gradle.testing.jacoco.tasks.JacocoReport
+
 plugins {
-    // nmcp aggregation plugin creates `publishAggregationToCentralPortal`
+    // Provides `publishAggregationToCentralPortal`
     id("com.gradleup.nmcp.aggregation") version "1.2.0"
 
     alias(libs.plugins.android.library)
@@ -13,13 +17,12 @@ plugins {
 /* ---------- nmcp Aggregation (Central Portal) ---------- */
 nmcpAggregation {
     centralPortal {
-        // Read Central Portal credentials from CI env
         username = System.getenv("CENTRAL_USERNAME")
         password = System.getenv("CENTRAL_PASSWORD")
-        // Auto-publish once validation passes
         publishingType = "AUTOMATIC"
+        // validationTimeout = java.time.Duration.ofMinutes(30)
+        // publishingTimeout = java.time.Duration.ofMinutes(30)
     }
-    // Collect publications from this project (and subprojects if any)
     publishAllProjectsProbablyBreakingProjectIsolation()
 }
 
@@ -71,7 +74,6 @@ version = "0.1.2"
 
 /* ---------- Publications (consumed by nmcp aggregation) ---------- */
 publishing {
-    // NOTE: no repository block here; nmcp aggregation handles upload to Central
     publications {
         create<MavenPublication>("authuiRelease") {
             groupId = "io.github.ciscode-ma"
@@ -109,16 +111,23 @@ publishing {
     }
 }
 
-/* ---------- Sign everything in the publication (POM, module, AAR, sources) ---------- */
-val signingKey: String? = System.getenv("SIGNING_KEY")
+/* ---------- Signing (supports file-based or env-based key) ---------- */
 val signingPassword: String? = System.getenv("SIGNING_PASSWORD")
+
+// Preferred: provide SIGNING_KEY_FILE (path to ASCII-armored private key).
+// Fallback: SIGNING_KEY (actual ASCII content as env).
+val signingKey: String? =
+    System.getenv("SIGNING_KEY_FILE")?.let { path ->
+        val f = File(path)
+        if (f.canRead()) f.readText(Charsets.UTF_8) else null
+    } ?: System.getenv("SIGNING_KEY")
 
 signing {
     if (!signingKey.isNullOrBlank()) {
         useInMemoryPgpKeys(signingKey, signingPassword)
         sign(publishing.publications)
     } else {
-        logger.warn("SIGNING_KEY not provided. Central Portal will reject unsigned artifacts.")
+        logger.warn("No signing key provided (SIGNING_KEY_FILE or SIGNING_KEY). Central Portal will reject unsigned artifacts.")
     }
 }
 
