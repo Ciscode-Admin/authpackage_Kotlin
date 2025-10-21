@@ -77,50 +77,58 @@ steps:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
 
-  # ---- Diagnostic: validate SIGNING_KEY format safely (no secrets printed) ----
+  # ---- Diagnostic: validate SIGNING_KEY and show gpg error safely ----
   - bash: |
-      set -euo pipefail
-      echo "Diagnostic: validating SIGNING_KEY format (no secrets will be printed)."
+    set -euo pipefail
+    echo "Diagnostic: validating SIGNING_KEY format (no secrets will be printed)."
 
-      tmpdir="$(mktemp -d)"
-      raw="$tmpdir/key_raw.txt"
-      printf '%s' "$SIGNING_KEY" > "$raw"
+    echo "--- gpg version ---"
+    gpg --version || true
 
-      fixed="$tmpdir/key_fixed.asc"
-      if grep -q '\\n' "$raw"; then
-        echo "Result: Found literal '\\n' characters -> converting to real newlines."
-        sed 's/\\r//g; s/\\n/\n/g' "$raw" > "$fixed"
-      else
-        tr -d '\r' < "$raw" > "$fixed"
-      fi
+    tmpdir="$(mktemp -d)"
+    raw="$tmpdir/key_raw.txt"
+    printf '%s' "$SIGNING_KEY" > "$raw"
 
-      if head -1 "$fixed" | grep -q 'BEGIN PGP PRIVATE KEY BLOCK'; then
-        echo "Marker check (BEGIN): PASS"
-      else
-        echo "Marker check (BEGIN): FAIL"
-        exit 1
-      fi
+    fixed="$tmpdir/key_fixed.asc"
+    if grep -q '\\n' "$raw"; then
+      echo "Result: Found literal '\\n' characters -> converting to real newlines."
+      sed 's/\\r//g; s/\\n/\n/g' "$raw" > "$fixed"
+    else
+      tr -d '\r' < "$raw" > "$fixed"
+    fi
 
-      if grep -q 'END PGP PRIVATE KEY BLOCK' "$fixed"; then
-        echo "Marker check (END): PASS"
-      else
-        echo "Marker check (END): FAIL"
-        exit 1
-      fi
+    if head -1 "$fixed" | grep -q 'BEGIN PGP PRIVATE KEY BLOCK'; then
+      echo "Marker check (BEGIN): PASS"
+    else
+      echo "Marker check (BEGIN): FAIL"; exit 1
+    fi
+    if grep -q 'END PGP PRIVATE KEY BLOCK' "$fixed"; then
+      echo "Marker check (END): PASS"
+    else
+      echo "Marker check (END): FAIL"; exit 1
+    fi
 
-      GNUPGHOME="$tmpdir/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
-      if gpg --batch --pinentry-mode loopback --passphrase "${SIGNING_PASSWORD:-}" --import "$fixed" >/dev/null 2>&1; then
-        echo "GPG import test: PASS"
-      else
-        echo "GPG import test: FAIL"
-        exit 1
-      fi
+    echo "--- gpg import test (capturing stderr) ---"
+    GNUPGHOME="$tmpdir/gnupg"; mkdir -p "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
+    set +e
+    gpg --batch --pinentry-mode loopback --passphrase "${SIGNING_PASSWORD:-}" --import "$fixed" 2> "$tmpdir/err.txt"
+    rc=$?
+    set -e
+    if [ $rc -eq 0 ]; then
+      echo "GPG import test: PASS"
+    else
+      echo "GPG import test: FAIL (exit $rc)"
+      echo "--- gpg stderr ---"
+      # This shows the error text only; it will NOT display your key contents.
+      sed -e 's/\r$//' "$tmpdir/err.txt" | tail -n +1
+      exit 1
+    fi
 
-      echo "Diagnostic complete."
-    displayName: Diagnose SIGNING_KEY formatting
-    env:
-      SIGNING_KEY: $(SIGNING_KEY)
-      SIGNING_PASSWORD: $(SIGNING_PASSWORD)
+    echo "Diagnostic complete."
+  displayName: Diagnose SIGNING_KEY formatting (verbose)
+  env:
+    SIGNING_KEY: $(SIGNING_KEY)
+    SIGNING_PASSWORD: $(SIGNING_PASSWORD)
 
   # ---- Publish to Maven Central via nmcp aggregation ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
