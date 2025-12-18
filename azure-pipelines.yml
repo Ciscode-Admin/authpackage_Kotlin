@@ -119,3 +119,25 @@ steps:
       SIGNING_KEY_FILE: $(gpgkey.secureFilePath)   # path to downloaded ASCII key (used by build.gradle.kts)
       SIGNING_PASSWORD: $(SIGNING_PASSWORD)        # key passphrase
       SIGNING_KEY: ''                              # explicitly unset in case a var group still defines it
+
+  # ---- Sync Azure DevOps 'release' branch to GitHub ONLY if pipeline succeeded ----
+  - bash: |
+      set -e
+
+      git config user.name "azure-pipelines"
+      git config user.email "azure-pipelines@users.noreply.github.com"
+
+      # Add GitHub remote (if not already present)
+      if ! git remote | grep -q github; then
+        git remote add github https://$(GITHUB_PAT)@github.com/<ORG>/<REPO>.git
+      fi
+
+      # Ensure we're on release
+      git checkout release
+
+      # Push release branch to GitHub
+      git push github release --force-with-lease
+    displayName: Sync release branch to GitHub
+    condition: succeeded()
+    env:
+      GITHUB_PAT: $(GITHUB_PAT)
