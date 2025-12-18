@@ -78,14 +78,12 @@ steps:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
 
-  # ---- Download GPG private key from Azure Secure files ----
   - task: DownloadSecureFile@1
     name: gpgkey
     displayName: Download signing key (Secure file)
     inputs:
       secureFile: 'ciscode_private.asc'
 
-  # ---- Validate the downloaded key (no secrets printed) ----
   - bash: |
       set -euo pipefail
       echo "--- gpg version ---"
@@ -109,7 +107,6 @@ steps:
       echo "Key validation: PASS"
     displayName: Validate signing key (show-only)
 
-  # ---- Publish to Maven Central via nmcp aggregation ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
@@ -119,20 +116,19 @@ steps:
       SIGNING_PASSWORD: $(SIGNING_PASSWORD)
       SIGNING_KEY: ''
 
-  # ---- Sync Azure DevOps release branch -> GitHub (only if previous steps succeeded) ----
+  # ---- Sync Azure DevOps release branch -> GitHub (only runs if pipeline is still succeeding) ----
   - bash: |
       set -euo pipefail
 
       git config user.email "azure-pipelines@local"
       git config user.name "Azure Pipelines"
 
-      # origin is already set by checkout; with persistCredentials:true, it can fetch without prompting
       git fetch origin release --prune
       git checkout -B release origin/release
 
-      # IMPORTANT: Create a secret pipeline variable named GITHUB_PAT (classic PAT with repo scope)
+      # Use PAT directly in the URL (GitHub does NOT accept password auth; PAT must be valid)
       git remote remove github 2>/dev/null || true
-      git remote add github "https://x-access-token:${GITHUB_PAT}@github.com/ASMAEELKHIRAOUI/login-kotlin.git"
+      git remote add github "https://${GITHUB_PAT}@github.com/ASMAEELKHIRAOUI/login-kotlin.git"
 
       git push github release:release
       git push github --tags || true
