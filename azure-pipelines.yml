@@ -93,12 +93,10 @@ steps:
       KEYFILE="$(gpgkey.secureFilePath)"
       echo "Validating secure key file at: ${KEYFILE}"
 
-      # Basic header/footer sanity checks
       head -n 1 "${KEYFILE}" | grep -q 'BEGIN PGP PRIVATE KEY BLOCK' || { echo "ERROR: Missing BEGIN marker"; exit 1; }
       tail -n 1 "${KEYFILE}" | grep -q 'END PGP PRIVATE KEY BLOCK' || { echo "ERROR: Missing END marker"; exit 1; }
 
       echo "--- gpg show-only import (should show 'sec'/'ssb') ---"
-      # This prints metadata only; it does NOT import into the agent keyring.
       set +e
       OUT=$(gpg --batch --import-options show-only --import "${KEYFILE}" 2>&1)
       RC=$?
@@ -116,28 +114,30 @@ steps:
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
-      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)   # path to downloaded ASCII key (used by build.gradle.kts)
-      SIGNING_PASSWORD: $(SIGNING_PASSWORD)        # key passphrase
-      SIGNING_KEY: ''                              # explicitly unset in case a var group still defines it
+      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)
+      SIGNING_PASSWORD: $(SIGNING_PASSWORD)
+      SIGNING_KEY: ''
 
-  # ---- Sync Azure DevOps 'release' branch to GitHub ONLY if pipeline succeeded ----
+  # ---- Sync Azure DevOps release branch -> GitHub (only runs if previous steps succeeded) ----
   - bash: |
-      set -e
+      set -euo pipefail
 
-      git config user.name "azure-pipelines"
-      git config user.email "azure-pipelines@users.noreply.github.com"
+      git config user.email "azure-pipelines@local"
+      git config user.name "Azure Pipelines"
 
-      # Add GitHub remote (if not already present)
-      if ! git remote | grep -q github; then
-        git remote add github https://$(GITHUB_PAT)@github.com/<ORG>/<REPO>.git
-      fi
-
-      # Ensure we're on release
+      # Ensure we're on the branch that triggered the run (release)
       git checkout release
 
-      # Push release branch to GitHub
-      git push github release --force-with-lease
+      # Add/refresh GitHub remote (no token in URL)
+      if git remote | grep -q '^github$'; then
+        git remote remove github
+      fi
+      git remote add github https://github.com/ASMAEELKHIRAOUI/login-kotlin.git
+
+      # Push using an auth header (keeps token out of command output)
+      AUTH="$(printf "x-access-token:%s" "$GITHUB_PAT" | base64 -w 0)"
+      git -c http.extraHeader="AUTHORIZATION: basic ${AUTH}" push github release:release
+      git -c http.extraHeader="AUTHORIZATION: basic ${AUTH}" push github --tags || true
     displayName: Sync release branch to GitHub
-    condition: succeeded()
     env:
       GITHUB_PAT: $(GITHUB_PAT)
