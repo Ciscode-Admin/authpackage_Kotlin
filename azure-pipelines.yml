@@ -82,7 +82,7 @@ steps:
     name: gpgkey
     displayName: Download signing key (Secure file)
     inputs:
-      secureFile: 'ciscode_private.asc'   # must match the file name in Library → Secure files
+      secureFile: 'ciscode_private.asc'
 
   # ---- Validate the downloaded key (no secrets printed) ----
   - bash: |
@@ -108,7 +108,7 @@ steps:
       echo "Key validation: PASS"
     displayName: Validate signing key (show-only)
 
-  # ---- Publish to Maven Central via nmcp aggregation (force secure-file usage) ----
+  # ---- Publish to Maven Central via nmcp aggregation ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
@@ -118,26 +118,24 @@ steps:
       SIGNING_PASSWORD: $(SIGNING_PASSWORD)
       SIGNING_KEY: ''
 
-  # ---- Sync Azure DevOps release branch -> GitHub (only runs if previous steps succeeded) ----
+  # ---- Sync Azure DevOps release branch -> GitHub (only if previous steps succeeded) ----
   - bash: |
       set -euo pipefail
 
       git config user.email "azure-pipelines@local"
       git config user.name "Azure Pipelines"
 
-      # Ensure we're on the branch that triggered the run (release)
-      git checkout release
+      # Make sure we have the latest release from Azure DevOps origin
+      git fetch origin release --prune
+      git checkout -B release origin/release
 
-      # Add/refresh GitHub remote (no token in URL)
-      if git remote | grep -q '^github$'; then
-        git remote remove github
-      fi
-      git remote add github https://github.com/ASMAEELKHIRAOUI/login-kotlin.git
+      # Use PAT via URL to avoid interactive username/password prompts
+      # IMPORTANT: Create a secret pipeline variable named GITHUB_PAT
+      git remote remove github 2>/dev/null || true
+      git remote add github "https://x-access-token:${GITHUB_PAT}@github.com/ASMAEELKHIRAOUI/login-kotlin.git"
 
-      # Push using an auth header (keeps token out of command output)
-      AUTH="$(printf "x-access-token:%s" "$GITHUB_PAT" | base64 -w 0)"
-      git -c http.extraHeader="AUTHORIZATION: basic ${AUTH}" push github release:release
-      git -c http.extraHeader="AUTHORIZATION: basic ${AUTH}" push github --tags || true
+      git push github release:release
+      git push github --tags || true
     displayName: Sync release branch to GitHub
     env:
       GITHUB_PAT: $(GITHUB_PAT)
