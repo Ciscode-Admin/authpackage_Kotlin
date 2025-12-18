@@ -10,6 +10,7 @@ variables:
 steps:
   - checkout: self
     fetchDepth: 0
+    persistCredentials: true
 
   - task: JavaToolInstaller@0
     inputs:
@@ -125,12 +126,11 @@ steps:
       git config user.email "azure-pipelines@local"
       git config user.name "Azure Pipelines"
 
-      # Make sure we have the latest release from Azure DevOps origin
+      # origin is already set by checkout; with persistCredentials:true, it can fetch without prompting
       git fetch origin release --prune
       git checkout -B release origin/release
 
-      # Use PAT via URL to avoid interactive username/password prompts
-      # IMPORTANT: Create a secret pipeline variable named GITHUB_PAT
+      # IMPORTANT: Create a secret pipeline variable named GITHUB_PAT (classic PAT with repo scope)
       git remote remove github 2>/dev/null || true
       git remote add github "https://x-access-token:${GITHUB_PAT}@github.com/ASMAEELKHIRAOUI/login-kotlin.git"
 
