@@ -99,8 +99,6 @@ steps:
   - bash: |
       set -euo pipefail
 
-      GITHUB_REPO="https://github.com/Ciscode-Admin/authpackage_Kotlin.git"
-
       if [[ -z "${GITHUB_PAT:-}" ]]; then
         echo "ERROR: GITHUB_PAT is not set."
         exit 1
@@ -117,11 +115,15 @@ steps:
       git remote remove github 2>/dev/null || true
       git remote add github "https://x-access-token:${GITHUB_PAT}@github.com/Ciscode-Admin/authpackage_Kotlin.git"
 
-      echo "Force-updating GitHub main to exactly match Azure DevOps release..."
-      # This pushes Azure origin/release to GitHub main
-      git push github refs/remotes/origin/release:refs/heads/main --force-with-lease
+      echo "Fetching current GitHub main for lease safety..."
+      # This updates refs/remotes/github/main so --force-with-lease can validate safely
+      git fetch github refs/heads/main:refs/remotes/github/main || true
 
-      echo "Pushing tags (optional, keeps versions aligned)..."
+      echo "Force-updating GitHub main to exactly match Azure DevOps release..."
+      git push github refs/remotes/origin/release:refs/heads/main \
+        --force-with-lease=refs/heads/main:refs/remotes/github/main
+
+      echo "Pushing tags (optional)..."
       git push github --tags
 
       echo "✅ Done: Azure 'release' is now GitHub 'main'."
