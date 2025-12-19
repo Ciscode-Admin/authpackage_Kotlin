@@ -70,7 +70,7 @@ android {
 }
 
 group = "io.github.ciscode-ma"
-version = "0.1.8"
+version = "0.1.9"
 
 /* ---------- Publications (consumed by nmcp aggregation) ---------- */
 publishing {
@@ -78,7 +78,7 @@ publishing {
         create<MavenPublication>("authuiRelease") {
             groupId = "io.github.ciscode-ma"
             artifactId = "authui"
-            version = "0.1.8"
+            version = "0.1.9"
 
             // Include the Android AAR + metadata from the release variant
             afterEvaluate { from(components["release"]) }
