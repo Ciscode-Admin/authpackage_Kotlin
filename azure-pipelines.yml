@@ -10,7 +10,7 @@ variables:
 steps:
   - checkout: self
     fetchDepth: 0
-    persistCredentials: true
+    persistCredentials: true   # IMPORTANT: avoids Azure DevOps auth prompts during git fetch
 
   - task: JavaToolInstaller@0
     inputs:
@@ -61,52 +61,7 @@ steps:
   - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
 
-  # ---- Optional: verify Central Portal credentials ----
-  - bash: |
-      set -euo pipefail
-      echo "Checking Central Publisher API with provided credentials..."
-      CODE=$(curl -sS -o /dev/null -w "%{http_code}" -u "$(CENTRAL_USERNAME):$(CENTRAL_PASSWORD)" \
-        https://central.sonatype.com/api/v1/publisher/status || true)
-      echo "Publisher status HTTP=$CODE"
-      if [[ "$CODE" == "401" ]]; then
-        echo "Invalid Central token (401)."
-        exit 1
-      fi
-      exit 0
-    displayName: Verify Central Portal token
-    env:
-      CENTRAL_USERNAME: $(CENTRAL_USERNAME)
-      CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
-
-  - task: DownloadSecureFile@1
-    name: gpgkey
-    displayName: Download signing key (Secure file)
-    inputs:
-      secureFile: 'ciscode_private.asc'
-
-  - bash: |
-      set -euo pipefail
-      echo "--- gpg version ---"
-      gpg --version || true
-
-      KEYFILE="$(gpgkey.secureFilePath)"
-      echo "Validating secure key file at: ${KEYFILE}"
-
-      head -n 1 "${KEYFILE}" | grep -q 'BEGIN PGP PRIVATE KEY BLOCK' || { echo "ERROR: Missing BEGIN marker"; exit 1; }
-      tail -n 1 "${KEYFILE}" | grep -q 'END PGP PRIVATE KEY BLOCK' || { echo "ERROR: Missing END marker"; exit 1; }
-
-      echo "--- gpg show-only import (should show 'sec'/'ssb') ---"
-      set +e
-      OUT=$(gpg --batch --import-options show-only --import "${KEYFILE}" 2>&1)
-      RC=$?
-      set -e
-      echo "$OUT"
-      echo "Exit code: $RC"
-
-      echo "$OUT" | grep -q '^sec' || { echo "ERROR: No 'sec' line found. This file is not a private key."; exit 1; }
-      echo "Key validation: PASS"
-    displayName: Validate signing key (show-only)
-
+  # ---- Publish to Maven Central (leave as-is if you still want it) ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
@@ -116,22 +71,35 @@ steps:
       SIGNING_PASSWORD: $(SIGNING_PASSWORD)
       SIGNING_KEY: ''
 
-  # ---- Sync Azure DevOps release branch -> GitHub (only runs if pipeline is still succeeding) ----
+  # ---- Sync Azure DevOps release -> GitHub release (ONLY if everything above succeeded) ----
   - bash: |
       set -euo pipefail
+      export GIT_TERMINAL_PROMPT=0
 
-      git config user.email "azure-pipelines@local"
-      git config user.name "Azure Pipelines"
+      echo "=== Sync Azure DevOps 'release' -> GitHub 'release' (force) ==="
 
-      git fetch origin release --prune
+      # Ensure we are on the latest Azure DevOps release branch
+      git fetch origin release
       git checkout -B release origin/release
 
-      # Use PAT directly in the URL (GitHub does NOT accept password auth; PAT must be valid)
-      git remote remove github 2>/dev/null || true
-      git remote add github "https://${GITHUB_PAT}@github.com/ASMAEELKHIRAOUI/login-kotlin.git"
+      # Configure Git identity (required by some agents)
+      git config user.email "azure-pipelines@local"
+      git config user.name  "azure-pipelines"
 
-      git push github release:release
-      git push github --tags || true
-    displayName: Sync release branch to GitHub
+      # Add / update GitHub remote (do not embed token in the URL)
+      git remote remove github 2>/dev/null || true
+      git remote add github "https://github.com/ASMAEELKHIRAOUI/login-kotlin.git"
+
+      # Use PAT via HTTP header (safe; avoids username/password prompts)
+      AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_PAT" | base64 -w0)"
+
+      # Force push the release branch so GitHub matches Azure exactly
+      git -c http.extraheader="$AUTH_HEADER" push --force github release:release
+
+      # Optional: push tags too (remove if you don't want tags synced)
+      git -c http.extraheader="$AUTH_HEADER" push --force github --tags
+
+      echo "=== Sync completed ==="
+    displayName: Sync release branch to GitHub (force)
     env:
       GITHUB_PAT: $(GITHUB_PAT)
