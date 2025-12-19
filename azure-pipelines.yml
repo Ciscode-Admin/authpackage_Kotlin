@@ -10,7 +10,7 @@ variables:
 steps:
   - checkout: self
     fetchDepth: 0
-    persistCredentials: true   # IMPORTANT: avoids Azure DevOps auth prompts during git fetch
+    persistCredentials: true
 
   - task: JavaToolInstaller@0
     inputs:
@@ -61,45 +61,81 @@ steps:
   - bash: ./gradlew :assembleRelease --no-daemon
     displayName: Build release AAR
 
-  # ---- Publish to Maven Central (leave as-is if you still want it) ----
+  # ---- Optional: verify Central Portal credentials ----
+  - bash: |
+      set -euo pipefail
+      echo "Checking Central Publisher API with provided credentials..."
+      CODE=$(curl -sS -o /dev/null -w "%{http_code}" -u "$(CENTRAL_USERNAME):$(CENTRAL_PASSWORD)" \
+        https://central.sonatype.com/api/v1/publisher/status || true)
+      echo "Publisher status HTTP=$CODE"
+      if [[ "$CODE" == "401" ]]; then
+        echo "Invalid Central token (401)."
+        exit 1
+      fi
+      exit 0
+    displayName: Verify Central Portal token
+    env:
+      CENTRAL_USERNAME: $(CENTRAL_USERNAME)
+      CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
+
+  # ---- Download GPG private key from Azure Secure files ----
+  - task: DownloadSecureFile@1
+    name: gpgkey
+    displayName: Download signing key (Secure file)
+    inputs:
+      secureFile: 'ciscode_private.asc'   # must match Library → Secure files
+
+  # ---- Ensure the key file is present (fail fast) ----
+  - bash: |
+      set -euo pipefail
+      echo "Signing key path: $(gpgkey.secureFilePath)"
+      test -f "$(gpgkey.secureFilePath)" || (echo "ERROR: signing key file not found" && exit 1)
+      head -n 1 "$(gpgkey.secureFilePath)" | grep -q "BEGIN PGP PRIVATE KEY BLOCK" || (echo "ERROR: not a private key" && exit 1)
+    displayName: Verify signing key file exists
+
+  # ---- Publish to Maven Central via nmcp aggregation (signed) ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
-      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)
-      SIGNING_PASSWORD: $(SIGNING_PASSWORD)
-      SIGNING_KEY: ''
+      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)   # path to downloaded ASCII key
+      SIGNING_PASSWORD: $(SIGNING_PASSWORD)        # key passphrase
+      SIGNING_KEY: ''                              # explicitly unset
 
-  # ---- Sync Azure DevOps release -> GitHub release (ONLY if everything above succeeded) ----
+  # ---- Sync release branch to GitHub (only if pipeline succeeded so far) ----
   - bash: |
       set -euo pipefail
-      export GIT_TERMINAL_PROMPT=0
 
-      echo "=== Sync Azure DevOps 'release' -> GitHub 'release' (force) ==="
+      # Hard-coded GitHub repo URL (as requested)
+      GH_URL="https://github.com/ASMAEELKHIRAOUI/login-kotlin.git"
 
-      # Ensure we are on the latest Azure DevOps release branch
+      if [[ -z "${GITHUB_PAT:-}" ]]; then
+        echo "ERROR: GITHUB_PAT is not set in pipeline variables."
+        exit 1
+      fi
+
+      echo "Configure git identity for CI..."
+      git config user.email "azure-devops@local"
+      git config user.name "Azure DevOps Pipeline"
+
+      echo "Make sure we are on the Azure DevOps 'release' branch..."
       git fetch origin release
-      git checkout -B release origin/release
+      git checkout release
+      git reset --hard origin/release
 
-      # Configure Git identity (required by some agents)
-      git config user.email "azure-pipelines@local"
-      git config user.name  "azure-pipelines"
-
-      # Add / update GitHub remote (do not embed token in the URL)
+      echo "Add/update GitHub remote..."
       git remote remove github 2>/dev/null || true
-      git remote add github "https://github.com/ASMAEELKHIRAOUI/login-kotlin.git"
+      git remote add github "${GH_URL}"
 
-      # Use PAT via HTTP header (safe; avoids username/password prompts)
-      AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_PAT" | base64 -w0)"
+      echo "Use PAT for GitHub authentication (no prompts)..."
+      git remote set-url github "https://${GITHUB_PAT}@github.com/ASMAEELKHIRAOUI/login-kotlin.git"
 
-      # Force push the release branch so GitHub matches Azure exactly
-      git -c http.extraheader="$AUTH_HEADER" push --force github release:release
+      echo "Push Azure DevOps release -> GitHub release (mirror commits)..."
+      git push github release:release --force-with-lease
 
-      # Optional: push tags too (remove if you don't want tags synced)
-      git -c http.extraheader="$AUTH_HEADER" push --force github --tags
-
-      echo "=== Sync completed ==="
-    displayName: Sync release branch to GitHub (force)
+      echo "GitHub sync complete."
+    displayName: Sync release branch to GitHub
+    condition: succeeded()
     env:
       GITHUB_PAT: $(GITHUB_PAT)
