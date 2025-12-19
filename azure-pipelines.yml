@@ -83,9 +83,8 @@ steps:
     name: gpgkey
     displayName: Download signing key (Secure file)
     inputs:
-      secureFile: 'ciscode_private.asc'   # must match Library → Secure files
+      secureFile: 'ciscode_private.asc'
 
-  # ---- Ensure the key file is present (fail fast) ----
   - bash: |
       set -euo pipefail
       echo "Signing key path: $(gpgkey.secureFilePath)"
@@ -99,43 +98,36 @@ steps:
     env:
       CENTRAL_USERNAME: $(CENTRAL_USERNAME)
       CENTRAL_PASSWORD: $(CENTRAL_PASSWORD)
-      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)   # path to downloaded ASCII key
-      SIGNING_PASSWORD: $(SIGNING_PASSWORD)        # key passphrase
-      SIGNING_KEY: ''                              # explicitly unset
+      SIGNING_KEY_FILE: $(gpgkey.secureFilePath)
+      SIGNING_PASSWORD: $(SIGNING_PASSWORD)
+      SIGNING_KEY: ''
 
-  # ---- Sync release branch to GitHub (only if pipeline succeeded so far) ----
+  # ---- Sync ALL commits/branches/tags to existing GitHub repo ----
   - bash: |
       set -euo pipefail
 
-      # Hard-coded GitHub repo URL (as requested)
-      GH_URL="https://github.com/ASMAEELKHIRAOUI/login-kotlin.git"
-
+      GITHUB_REPO="Ciscode-Admin/authpackage_Kotlin"
       if [[ -z "${GITHUB_PAT:-}" ]]; then
-        echo "ERROR: GITHUB_PAT is not set in pipeline variables."
+        echo "ERROR: GITHUB_PAT is not set."
         exit 1
       fi
 
-      echo "Configure git identity for CI..."
+      echo "Configuring git identity..."
       git config user.email "azure-devops@local"
       git config user.name "Azure DevOps Pipeline"
 
-      echo "Make sure we are on the Azure DevOps 'release' branch..."
-      git fetch origin release
-      git checkout release
-      git reset --hard origin/release
+      echo "Fetching full history from Azure DevOps..."
+      git fetch --all --tags --prune
 
-      echo "Add/update GitHub remote..."
+      echo "Adding/updating GitHub remote..."
       git remote remove github 2>/dev/null || true
-      git remote add github "${GH_URL}"
+      git remote add github "https://${GITHUB_PAT}@github.com/${GITHUB_REPO}.git"
 
-      echo "Use PAT for GitHub authentication (no prompts)..."
-      git remote set-url github "https://${GITHUB_PAT}@github.com/ASMAEELKHIRAOUI/login-kotlin.git"
+      echo "Pushing ALL refs (mirror) to GitHub..."
+      git push github --mirror
 
-      echo "Push Azure DevOps release -> GitHub release (mirror commits)..."
-      git push github release:release --force-with-lease
-
-      echo "GitHub sync complete."
-    displayName: Sync release branch to GitHub
+      echo "✅ GitHub repo synced with Azure DevOps."
+    displayName: Sync Azure DevOps -> GitHub (mirror)
     condition: succeeded()
     env:
       GITHUB_PAT: $(GITHUB_PAT)
