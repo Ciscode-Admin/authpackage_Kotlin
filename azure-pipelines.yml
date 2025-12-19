@@ -85,14 +85,7 @@ steps:
     inputs:
       secureFile: 'ciscode_private.asc'
 
-  - bash: |
-      set -euo pipefail
-      echo "Signing key path: $(gpgkey.secureFilePath)"
-      test -f "$(gpgkey.secureFilePath)" || (echo "ERROR: signing key file not found" && exit 1)
-      head -n 1 "$(gpgkey.secureFilePath)" | grep -q "BEGIN PGP PRIVATE KEY BLOCK" || (echo "ERROR: not a private key" && exit 1)
-    displayName: Verify signing key file exists
-
-  # ---- Publish to Maven Central via nmcp aggregation (signed) ----
+  # ---- Publish to Maven Central via nmcp aggregation ----
   - bash: ./gradlew publishAggregationToCentralPortal --stacktrace --no-daemon
     displayName: Publish to Maven Central (Central Portal via nmcp)
     env:
@@ -102,11 +95,12 @@ steps:
       SIGNING_PASSWORD: $(SIGNING_PASSWORD)
       SIGNING_KEY: ''
 
-  # ---- Sync ALL commits/branches/tags to existing GitHub repo ----
+  # ---- Sync Azure DevOps release -> GitHub main (NO deletes) ----
   - bash: |
       set -euo pipefail
 
-      GITHUB_REPO="Ciscode-Admin/authpackage_Kotlin"
+      GITHUB_REPO="https://github.com/Ciscode-Admin/authpackage_Kotlin.git"
+
       if [[ -z "${GITHUB_PAT:-}" ]]; then
         echo "ERROR: GITHUB_PAT is not set."
         exit 1
@@ -116,18 +110,22 @@ steps:
       git config user.email "azure-devops@local"
       git config user.name "Azure DevOps Pipeline"
 
-      echo "Fetching full history from Azure DevOps..."
+      echo "Fetching full history + tags from Azure DevOps..."
       git fetch --all --tags --prune
 
       echo "Adding/updating GitHub remote..."
       git remote remove github 2>/dev/null || true
-      git remote add github "https://${GITHUB_PAT}@github.com/${GITHUB_REPO}.git"
+      git remote add github "https://x-access-token:${GITHUB_PAT}@github.com/Ciscode-Admin/authpackage_Kotlin.git"
 
-      echo "Pushing ALL refs (mirror) to GitHub..."
-      git push github --mirror
+      echo "Force-updating GitHub main to exactly match Azure DevOps release..."
+      # This pushes Azure origin/release to GitHub main
+      git push github refs/remotes/origin/release:refs/heads/main --force-with-lease
 
-      echo "✅ GitHub repo synced with Azure DevOps."
-    displayName: Sync Azure DevOps -> GitHub (mirror)
+      echo "Pushing tags (optional, keeps versions aligned)..."
+      git push github --tags
+
+      echo "✅ Done: Azure 'release' is now GitHub 'main'."
+    displayName: Sync Azure DevOps release -> GitHub main
     condition: succeeded()
     env:
       GITHUB_PAT: $(GITHUB_PAT)
